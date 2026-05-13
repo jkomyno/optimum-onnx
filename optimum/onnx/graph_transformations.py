@@ -134,7 +134,16 @@ def check_and_save_model(model: onnx.ModelProto, save_path: str | Path | None):
     # For larger models, we need to save them first and then check their save path.
     # https://github.com/onnx/onnx/blob/main/docs/PythonAPIOverview.md#checking-a-large-onnx-model-2gb
 
-    if model.ByteSize() < onnx.checker.MAXIMUM_PROTOBUF:
+    try:
+        is_under_protobuf_limit = model.ByteSize() < onnx.checker.MAXIMUM_PROTOBUF
+    except Exception:
+        # ByteSize() can raise (e.g. google.protobuf.message.EncodeError) for
+        # models that exceed protobuf's 2GB serialization limit; treat that
+        # as "too big to check pre-save" and let the post-save check_model on
+        # the saved path handle validation instead.
+        is_under_protobuf_limit = False
+
+    if is_under_protobuf_limit:
         # For the try catch, refer to https://github.com/microsoft/onnxruntime/issues/14768
         try:
             onnx.checker.check_model(model)
