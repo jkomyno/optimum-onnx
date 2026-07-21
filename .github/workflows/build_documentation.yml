@@ -50,8 +50,10 @@ jobs:
       - name: Setup environment
         run: |
           pip install --upgrade pip uv
-          uv pip install .[onnxruntime] accelerate diffusers timm
           uv pip install git+https://github.com/huggingface/doc-builder
+          uv pip install . --no-deps
+          # optimum-onnx docs build under the library name `optimum` (shared registry)
+          doc-builder light-install optimum
 
       - name: Make documentation
         run: |
