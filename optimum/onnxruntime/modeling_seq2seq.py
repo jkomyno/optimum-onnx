@@ -259,19 +259,6 @@ TRANSLATION_EXAMPLE = r"""
     >>> outputs = tokenizer.batch_decode(gen_tokens)
     ```
 
-    Example using `transformers.pipeline`:
-
-    ```python
-    >>> from transformers import {processor_class}, pipeline
-    >>> from optimum.onnxruntime import {model_class}
-
-    >>> tokenizer = {processor_class}.from_pretrained("{checkpoint}")
-    >>> model = {model_class}.from_pretrained("{checkpoint}")
-    >>> onnx_translation = pipeline("translation_en_to_de", model=model, tokenizer=tokenizer)
-
-    >>> text = "My name is Eustache."
-    >>> pred = onnx_translation(text)
-    ```
 """
 
 
@@ -333,25 +320,6 @@ IMAGE_TO_TEXT_EXAMPLE = r"""
 
     ```
 
-    Example using `transformers.pipeline`:
-
-    ```python
-    >>> from transformers import {processor_class}, {tokenizer_class}, pipeline
-    >>> from optimum.onnxruntime import {model_class}
-    >>> from PIL import Image
-    >>> import requests
-
-
-    >>> processor = {processor_class}.from_pretrained("{checkpoint}")
-    >>> tokenizer = {tokenizer_class}.from_pretrained("{checkpoint}")
-    >>> model = {model_class}.from_pretrained("{checkpoint}", export=True)
-
-    >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-    >>> image = Image.open(requests.get(url, stream=True).raw)
-
-    >>> image_to_text = pipeline("image-to-text", model=model, tokenizer=tokenizer, feature_extractor=processor, image_processor=processor)
-    >>> pred = image_to_text(image)
-    ```
 """
 
 PIX2STRUCT_EXAMPLE = r"""

@@ -883,19 +883,6 @@ QUESTION_ANSWERING_EXAMPLE = r"""
     >>> start_scores = outputs.start_logits
     >>> end_scores = outputs.end_logits
     ```
-    Example using `transformers.pipeline`:
-
-    ```python
-    >>> from transformers import {processor_class}, pipeline
-    >>> from optimum.onnxruntime import {model_class}
-
-    >>> tokenizer = {processor_class}.from_pretrained("{checkpoint}")
-    >>> model = {model_class}.from_pretrained("{checkpoint}")
-    >>> onnx_qa = pipeline("question-answering", model=model, tokenizer=tokenizer)
-
-    >>> question, text = "Who was Jim Henson?", "Jim Henson was a nice puppet"
-    >>> pred = onnx_qa(question, text)
-    ```
 """
 
 
