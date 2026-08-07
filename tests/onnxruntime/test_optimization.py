@@ -25,9 +25,8 @@ import onnx
 import pytest
 import torch
 from parameterized import parameterized
-from testing_utils import MODEL_NAMES
+from testing_utils import MODEL_NAMES, get_preprocessor
 from transformers import AutoTokenizer
-from transformers.onnx.utils import get_preprocessor
 from transformers.testing_utils import require_torch_gpu
 
 from optimum.exporters.onnx.model_configs import ModernBertOnnxConfig
