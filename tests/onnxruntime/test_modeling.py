@@ -2413,7 +2413,6 @@ class ORTModelForCTCIntegrationTest(ORTModelTestMixin):
     SUPPORTED_ARCHITECTURES = [  # noqa: RUF012
         "data2vec-audio",
         "hubert",
-        "mctct",
         "sew",
         "sew-d",
         "unispeech",

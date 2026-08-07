@@ -17,9 +17,21 @@ from typing import Optional
 from unittest import TestCase
 
 from transformers import BertConfig
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
 
 from optimum.exporters.onnx.model_configs import BertOnnxConfig
 from optimum.exporters.tasks import TasksManager
+
+
+# Model types registered under `library_name="transformers"` that are not transformers model types,
+# and so are expected not to resolve in CONFIG_MAPPING_NAMES.
+NON_TRANSFORMERS_MODEL_TYPES = {
+    # Remote-code only architecture; it was never shipped by transformers.
+    "internlm2",
+    # Synthetic names for the text sub-component of a SigLIP export, not transformers model types.
+    "siglip-text",
+    "siglip-text-with-projection",
+}
 
 
 class TasksManagerTestCase(TestCase):
@@ -71,6 +83,60 @@ class TasksManagerTestCase(TestCase):
 
     def test_all_onnx_models_are_registered(self):
         return self._check_all_models_are_registered("onnx", "OnnxConfig")
+
+    def test_registered_transformers_model_types_exist_in_transformers(self):
+        """Every model type registered for the transformers library must still exist in transformers.
+
+        This guards against the exporter advertising an architecture that transformers has removed,
+        which is how `mctct` survived until the transformers v5 migration. Only the `transformers`
+        library registrations are checked: the diffusers, timm and sentence-transformers ones use
+        sub-component identifiers (`vae-encoder`, `default-timm-config`, ...) that are not, and are
+        not meant to be, transformers model types.
+        """
+        registered = TasksManager._LIBRARY_TO_SUPPORTED_MODEL_TYPES["transformers"]
+
+        unknown = {
+            model_type
+            for model_type, mappings in registered.items()
+            if "onnx" in mappings
+            and model_type not in NON_TRANSFORMERS_MODEL_TYPES
+            # TasksManager keys use hyphens where transformers uses underscores.
+            and model_type.replace("-", "_") not in CONFIG_MAPPING_NAMES
+            and model_type not in CONFIG_MAPPING_NAMES
+        }
+
+        self.assertEqual(
+            unknown,
+            set(),
+            f"Some model types are registered for the onnx backend but no longer exist in transformers "
+            f"{importlib.import_module('transformers').__version__}: {', '.join(sorted(unknown))}. "
+            "Remove their exporter configs and test fixtures, or add them to NON_TRANSFORMERS_MODEL_TYPES "
+            "if they are not transformers architectures.",
+        )
+
+    def test_registration_guard_must_filter_on_library_name(self):
+        """The guard above must not be written naively over every registered model type.
+
+        The diffusers, timm and sentence-transformers registrations use synthetic sub-component
+        names (`vae-encoder`, `default-timm-config`, ...) that deliberately do not exist in
+        transformers. This pins that fact, so that anyone rewriting the guard to iterate over all
+        libraries sees why it has to filter on `library_name` first.
+        """
+        for library in ("diffusers", "timm", "sentence_transformers"):
+            registered = TasksManager._LIBRARY_TO_SUPPORTED_MODEL_TYPES[library]
+            self.assertTrue(registered, f"Expected registrations for the {library} library.")
+
+            synthetic = {
+                model_type
+                for model_type in registered
+                if model_type.replace("-", "_") not in CONFIG_MAPPING_NAMES and model_type not in CONFIG_MAPPING_NAMES
+            }
+            self.assertTrue(
+                synthetic,
+                f"Expected the {library} registrations to use names absent from transformers; "
+                "if that is no longer true, the library_name filter in the guard above may be "
+                "hiding real removals.",
+            )
 
     def test_register(self):
         # Case 1: We try to register a config that was already registered, it should not register anything.

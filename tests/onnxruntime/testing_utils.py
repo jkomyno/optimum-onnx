@@ -96,7 +96,6 @@ MODEL_NAMES = {
     "marian": "optimum-internal-testing/tiny-random-marian",
     "mbart": "hf-internal-testing/tiny-random-MBartModel",
     # "metaclip_2": "facebook/metaclip-2-mt5-worldwide-s16",
-    "mctct": "hf-internal-testing/tiny-random-MCTCTModel",
     "mgp-str": "hf-internal-testing/tiny-random-MgpstrForSceneTextRecognition",
     "mistral": "echarlaix/tiny-random-mistral",
     "mobilebert": "hf-internal-testing/tiny-random-MobileBertModel",

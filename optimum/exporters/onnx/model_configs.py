@@ -91,7 +91,6 @@ from optimum.utils import (
     FalconDummyPastKeyValuesGenerator,
     GemmaDummyPastKeyValuesGenerator,
     LongformerDummyTextInputGenerator,
-    MCTCTDummyAudioInputGenerator,
     MistralDummyPastKeyValuesGenerator,
     NormalizedConfig,
     NormalizedEncoderDecoderConfig,
@@ -1901,35 +1900,6 @@ class UniSpeechSATOnnxConfig(HubertOnnxConfig):
 )
 class WavLMOnnxConfig(HubertOnnxConfig):
     pass
-
-
-@register_tasks_manager_onnx("mctct", *["feature-extraction", "automatic-speech-recognition"])
-class MCTCTOnnxConfig(AudioOnnxConfig):
-    NORMALIZED_CONFIG_CLASS = NormalizedConfig.with_args(
-        input_features_per_channel="input_feat_per_channel", allow_new=True
-    )
-    DUMMY_INPUT_GENERATOR_CLASSES = (MCTCTDummyAudioInputGenerator,)
-
-    @property
-    def inputs(self) -> dict[str, dict[int, str]]:
-        return {"input_features": {0: "batch_size", 1: "sequence_length"}}
-
-    @property
-    def outputs(self) -> dict[str, dict[int, str]]:
-        outputs = super().outputs
-
-        # mctct output formula adapted from:
-        # https://github.com/huggingface/transformers/blob/v4.53.3/src/transformers/models/deprecated/mctct/modeling_mctct.py#L455
-        if self.task == "automatic-speech-recognition":
-            sequence_length = "sequence_length"
-            for kernel_size, stride in zip(self._config.conv_kernel, self._config.conv_stride):
-                dilation = 1
-                padding = kernel_size // 2
-                sequence_length = f"( {sequence_length} + 2 * {padding} - {dilation} * ({kernel_size} - 1) - 1 )"
-                sequence_length = f"( {sequence_length} // {stride} ) + 1"
-            outputs["logits"] = {0: "batch_size", 1: sequence_length}
-
-        return outputs
 
 
 @register_tasks_manager_onnx("audio-spectrogram-transformer", *["feature-extraction", "audio-classification"])
