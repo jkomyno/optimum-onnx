@@ -7,7 +7,7 @@ name = "optimum-onnx"
 dynamic = ["version"]
 description = "Optimum ONNX is an interface between the Hugging Face libraries and ONNX / ONNX Runtime"
 readme = "README.md"
-requires-python = ">=3.9.0"
+requires-python = ">=3.10.0"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "HuggingFace Inc. Special Ops Team", email = "hardware@huggingface.co" },
@@ -21,16 +21,16 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "optimum~=2.2.0",
-    "transformers>=4.36,<4.58.0",
+    "optimum>=2.3.0,<3.0.0",
+    "transformers>=5.14,<6.0",
     "onnx",
     "onnxscript",
 ]
