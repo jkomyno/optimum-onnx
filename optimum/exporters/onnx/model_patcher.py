@@ -39,6 +39,7 @@ if is_transformers_version(">=", "4.48"):
     from transformers.cache_utils import DynamicCache, EncoderDecoderCache
     from transformers.models.moonshine.modeling_moonshine import MoonshinePreTrainedModel
 if is_transformers_version(">=", "4.53"):
+    from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, eager_mask, sdpa_mask
     from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
 if is_transformers_version(">=", "4.53.1"):
     from transformers.masking_utils import find_packed_sequence_indices
@@ -385,6 +386,21 @@ def find_packed_sequence_indices_patched(position_ids: torch.Tensor) -> torch.Te
     return torch.zeros_like(position_ids)
 
 
+# transformers' mask creation defaults to a non-vmap implementation, but forces `use_vmap=True`
+# whenever a model passes a custom `and_mask_function` / `or_mask_function` -- Falcon does this to
+# build its alibi mask, for example. vmap is not traceable, so the export dies inside functorch with
+# `RuntimeError: unordered_map::at: key not found`. These wrappers pin the stock v5 mask functions to
+# the index-based path for the duration of the export.
+def sdpa_mask_without_vmap(*args, **kwargs) -> torch.Tensor | None:
+    kwargs["use_vmap"] = False
+    return sdpa_mask(*args, **kwargs)
+
+
+def eager_mask_without_vmap(*args, **kwargs) -> torch.Tensor:
+    kwargs["use_vmap"] = False
+    return eager_mask(*args, **kwargs)
+
+
 original_triu = torch.triu
 original_tril = torch.tril
 
@@ -618,6 +634,12 @@ class ModelPatcher:
             self.original_cache_class = transformers.cache_utils.Cache
             transformers.cache_utils.Cache = TraceableCache
 
+        # transformers re-enables vmap for models that pass a custom mask function; vmap is not
+        # traceable, so pin the stock mask functions to their index-based path during the export.
+        if is_transformers_version(">=", "4.53"):
+            ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask_without_vmap)
+            ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask_without_vmap)
+
         # This is a workaround for the find_packed_sequence_indices function in transformers which
         # should only return a tensor of zeros with the same shape as position_ids indicating no packed sequence indices.
         # The function uses torch.diff which is not traceable by TorchScript.
@@ -638,6 +660,10 @@ class ModelPatcher:
 
         if is_transformers_version(">=", "4.44") and is_transformers_version("<", "4.50"):
             transformers.cache_utils.Cache = self.original_cache_class
+
+        if is_transformers_version(">=", "4.53"):
+            ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask)
+            ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask)
 
         if is_transformers_version(">=", "4.53.1"):
             transformers.masking_utils.find_packed_sequence_indices = self.original_find_packed_sequence_indices
