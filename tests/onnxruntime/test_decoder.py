@@ -193,8 +193,6 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
 
         tokenizer = self.get_tokenizer(model_arch)
         inputs = tokenizer(texts, return_tensors="pt", padding=True)
-        if for_generation and is_transformers_version(">=", "4.51.0") and is_transformers_version("<", "5.0"):
-            inputs["use_model_defaults"] = False
 
         return inputs
 
