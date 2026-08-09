@@ -1,13 +1,8 @@
 name: ONNX Runtime / Python - Test
 
+# Hub-backed integration suite. Run manually when model-download quota is available.
 on:
-  push:
-    branches:
-      - main
-      - v*-release
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
