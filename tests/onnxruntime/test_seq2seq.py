@@ -14,7 +14,6 @@
 import os
 import tempfile
 import unittest
-from typing import Optional
 
 import numpy as np
 import pytest
@@ -80,14 +79,14 @@ class ORTSeq2SeqTestMixin(ORTModelTestMixin):
         raise NotImplementedError(f"Please implement the `get_inputs` method in the {self.__class__.__name__} class.")
 
     def get_transformers_model(
-        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: Optional[bool] = None, **kwargs
+        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: bool | None = None, **kwargs
     ):
         raise NotImplementedError(
             f"Please implement the `get_transformers_model` method in the {self.__class__.__name__} class."
         )
 
     def get_onnx_model(
-        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: Optional[bool] = None, **kwargs
+        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: bool | None = None, **kwargs
     ):
         raise NotImplementedError(
             f"Please implement the `get_onnx_model` method in the {self.__class__.__name__} class."
@@ -97,8 +96,8 @@ class ORTSeq2SeqTestMixin(ORTModelTestMixin):
         self,
         onnx_model,
         use_cache: bool = True,
-        use_merged: Optional[bool] = None,
-        use_io_binding: Optional[bool] = None,
+        use_merged: bool | None = None,
+        use_io_binding: bool | None = None,
     ):
         self.assertIsInstance(onnx_model, self.ORTMODEL_CLASS)
         self.assertIsInstance(onnx_model.config, PretrainedConfig)
@@ -193,7 +192,7 @@ class ORTSeq2SeqTestMixin(ORTModelTestMixin):
 
     # NUMERICAL CONSISTENCY WITH TRANSFORMERS
     def _test_compare_logits_to_transformers(
-        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: Optional[bool] = None
+        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: bool | None = None
     ):
         setup_args = {
             "test_name": test_name,
@@ -213,7 +212,7 @@ class ORTSeq2SeqTestMixin(ORTModelTestMixin):
         self.compare_logits(model_arch, outputs, onnx_outputs, use_cache=use_cache)
 
     def _test_compare_generation_to_transformers(
-        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: Optional[bool] = None
+        self, test_name: str, model_arch: str, use_cache: bool = True, use_merged: bool | None = None
     ):
         setup_args = {
             "test_name": test_name,
@@ -486,8 +485,8 @@ class ORTModelForSeq2SeqLMIntegrationTest(ORTSeq2SeqTestMixin):
         test_name: str,
         model_arch: str,
         use_cache: bool = True,
-        use_merged: Optional[bool] = None,
-        use_io_binding: Optional[bool] = None,
+        use_merged: bool | None = None,
+        use_io_binding: bool | None = None,
     ):
         onnx_model = self.ORTMODEL_CLASS.from_pretrained(
             self.onnx_model_dirs[test_name], use_cache=use_cache, use_merged=use_merged, use_io_binding=use_io_binding
@@ -959,8 +958,8 @@ class ORTModelForSpeechSeq2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         self,
         test_name: str,
         use_cache: bool = True,
-        use_merged: Optional[bool] = None,
-        use_io_binding: Optional[bool] = None,
+        use_merged: bool | None = None,
+        use_io_binding: bool | None = None,
         **kwargs,
     ):
         onnx_model = self.ORTMODEL_CLASS.from_pretrained(
@@ -1222,8 +1221,8 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         self,
         test_name: str,
         use_cache: bool = True,
-        use_merged: Optional[bool] = None,
-        use_io_binding: Optional[bool] = None,
+        use_merged: bool | None = None,
+        use_io_binding: bool | None = None,
         **kwargs,
     ):
         onnx_model = self.ORTMODEL_CLASS.from_pretrained(

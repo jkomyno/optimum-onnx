@@ -240,7 +240,7 @@ class OnnxConfig(ExporterConfig, ABC):
 
             onnx_inputs = {}
             for name, value in dummy_inputs.items():
-                if isinstance(value, (list, tuple)):
+                if isinstance(value, list | tuple):
                     value = self.flatten_output_collection_property(name, value)
                     onnx_inputs.update(dict(value.items()))
                 else:
@@ -345,7 +345,7 @@ class OnnxConfig(ExporterConfig, ABC):
             `Dict[str, Any]`: Outputs with flattened structure and key mapping this new structure.
 
         """
-        if isinstance(field[0], (list, tuple)):
+        if isinstance(field[0], list | tuple):
             return {f"{name}.{idx}": item for idx, item in enumerate(itertools.chain.from_iterable(field))}
         else:
             return {f"{name}.{idx}": item for idx, item in enumerate(field)}

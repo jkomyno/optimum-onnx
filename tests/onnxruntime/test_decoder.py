@@ -14,7 +14,6 @@
 import os
 import tempfile
 import unittest
-from typing import Optional
 
 import torch
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
@@ -220,7 +219,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         test_name: str,
         use_cache: bool = True,
         trust_remote_code: bool = False,
-        use_io_binding: Optional[bool] = None,
+        use_io_binding: bool | None = None,
         **kwargs,
     ):
         onnx_model = self.ORTMODEL_CLASS.from_pretrained(
@@ -231,7 +230,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         )
         return onnx_model
 
-    def check_onnx_model_attributes(self, onnx_model, use_cache: bool = True, use_io_binding: Optional[bool] = None):
+    def check_onnx_model_attributes(self, onnx_model, use_cache: bool = True, use_io_binding: bool | None = None):
         self.assertIsInstance(onnx_model, self.ORTMODEL_CLASS)
         self.assertIsInstance(onnx_model.config, PretrainedConfig)
         self.assertIsInstance(onnx_model.session, InferenceSession)
@@ -250,7 +249,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         outputs1,
         outputs2,
         onnx_model: ORTModelForCausalLM,
-        use_cache: Optional[bool] = None,
+        use_cache: bool | None = None,
     ):
         self.assertTrue("logits" in outputs1)
         self.assertTrue("logits" in outputs2)

@@ -39,7 +39,8 @@ from optimum.utils.save_utils import maybe_load_preprocessors
 if is_torch_available():
     import torch
 
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:

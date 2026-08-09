@@ -20,10 +20,11 @@ import gc
 import multiprocessing as mp
 import os
 import traceback
+from collections.abc import Callable
 from inspect import signature
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -326,7 +327,7 @@ def _run_validation(
         # ("past_key_values" being taken for the ONNX inputs)
         if name == "past_key_values":
             name = "present"
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             onnx_output_name = config.torch_to_onnx_output_map.get(name, name)
             value = config.flatten_output_collection_property(onnx_output_name, value)
             ref_outputs_dict.update(value)
@@ -342,7 +343,7 @@ def _run_validation(
     # We flatten potential collection of inputs (i.e. past_keys)
     onnx_inputs = {}
     for name, value in reference_ort_inputs.items():
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             value = config.flatten_output_collection_property(name, value)
             onnx_inputs.update({tensor_name: pt_tensor.cpu().numpy() for tensor_name, pt_tensor in value.items()})
         elif isinstance(value, dict):

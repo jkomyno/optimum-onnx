@@ -18,7 +18,8 @@ import functools
 import inspect
 import sys
 import types
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import torch
 import transformers
@@ -176,14 +177,14 @@ def override_arguments(args, kwargs, forward_signature, model_kwargs: dict[str, 
 
 
 def preprocess_encoder_outputs(encoder_outputs):
-    if isinstance(encoder_outputs, (list, tuple)):
+    if isinstance(encoder_outputs, list | tuple):
         encoder_outputs = BaseModelOutput(*encoder_outputs)
 
     return encoder_outputs
 
 
 def preprocess_past_key_values(past_key_values):
-    if isinstance(past_key_values, (list, tuple)) and isinstance(past_key_values[0], (list, tuple)):
+    if isinstance(past_key_values, list | tuple) and isinstance(past_key_values[0], list | tuple):
         if len(past_key_values[0]) == 2:
             if hasattr(DynamicCache, "from_legacy_cache"):
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
@@ -206,7 +207,7 @@ def preprocess_past_key_values(past_key_values):
 
 
 def postprocess_past_key_values(past_key_values, output_names: list[str]):
-    if isinstance(past_key_values, (EncoderDecoderCache, DynamicCache)):
+    if isinstance(past_key_values, EncoderDecoderCache | DynamicCache):
         if hasattr(past_key_values, "to_legacy_cache"):
             past_key_values = past_key_values.to_legacy_cache()
         elif isinstance(past_key_values, DynamicCache):
@@ -223,8 +224,8 @@ def postprocess_past_key_values(past_key_values, output_names: list[str]):
             raise NotImplementedError(f"Unable to serialize class {type(past_key_values)}.")
 
     if (
-        isinstance(past_key_values, (list, tuple))
-        and isinstance(past_key_values[0], (list, tuple))
+        isinstance(past_key_values, list | tuple)
+        and isinstance(past_key_values[0], list | tuple)
         and not any("encoder.key" in output_name for output_name in output_names)
     ):
         past_key_values = tuple(pkv[:2] for pkv in past_key_values)
@@ -579,7 +580,7 @@ class ModelPatcher:
                         or any(key.startswith(onnx_output_name) for key in output_names)
                     ):
                         filtered_outputs[name] = value
-            elif isinstance(outputs, (list, tuple)):
+            elif isinstance(outputs, list | tuple):
                 filtered_outputs = dict(zip(output_names, outputs))
             else:
                 if len(output_names) > 1:

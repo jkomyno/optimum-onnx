@@ -258,7 +258,7 @@ class ORTDiffusionPipeline(ORTParentMixin, DiffusionPipeline):
             `ORTDiffusionPipeline`: The pipeline with the updated device.
         """
         for component in self.components.values():
-            if isinstance(component, (ORTSessionMixin, ORTParentMixin)):
+            if isinstance(component, ORTSessionMixin | ORTParentMixin):
                 component.to(device)
 
         return self
