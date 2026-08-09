@@ -27,7 +27,13 @@ from huggingface_hub import HfApi
 from huggingface_hub.constants import default_cache_path
 from parameterized import parameterized
 from PIL import Image
-from testing_utils import MODEL_NAMES, SEED, ORTModelTestMixin, select_architecture_transformer_version
+from testing_utils import (
+    MODEL_NAMES,
+    SEED,
+    ORTModelTestMixin,
+    get_preprocessor,
+    select_architecture_transformer_version,
+)
 from transformers import (
     AutoFeatureExtractor,
     AutoImageProcessor,
@@ -52,7 +58,6 @@ from transformers import (
 )
 from transformers.modeling_outputs import BaseModelOutput, ImageSuperResolutionOutput
 from transformers.models.swin2sr.configuration_swin2sr import Swin2SRConfig
-from transformers.onnx.utils import get_preprocessor
 from transformers.testing_utils import get_gpu_count, require_torch_gpu
 from transformers.utils import http_user_agent
 
@@ -550,92 +555,6 @@ class ORTModelForQuestionAnsweringIntegrationTest(ORTModelTestMixin):
             torch.testing.assert_close(
                 torch.Tensor(onnx_outputs.end_logits), transformers_outputs.end_logits, atol=self.ATOL, rtol=self.RTOL
             )
-
-        gc.collect()
-
-    @parameterized.expand(SUPPORTED_ARCHITECTURES)
-    def test_pipeline_ort_model(self, model_arch):
-        model_args = {"test_name": model_arch, "model_arch": model_arch}
-        self._setup(model_args)
-
-        model_id = MODEL_NAMES[model_arch]
-        onnx_model = ORTModelForQuestionAnswering.from_pretrained(self.onnx_model_dirs[model_arch])
-        tokenizer = get_preprocessor(model_id)
-        pipe = pipeline("question-answering", model=onnx_model, tokenizer=tokenizer)
-        question = "Whats my name?"
-        context = "My Name is Philipp and I live in Nuremberg."
-        outputs = pipe(question, context)
-
-        self.assertEqual(pipe.device, pipe.model.device)
-        self.assertGreaterEqual(outputs["score"], 0.0)
-        self.assertIsInstance(outputs["answer"], str)
-
-        gc.collect()
-
-    @pytest.mark.run_in_series
-    def test_pipeline_model_is_none(self):
-        pipe = pipeline("question-answering")
-        question = "Whats my name?"
-        context = "My Name is Philipp and I live in Nuremberg."
-        outputs = pipe(question, context)
-
-        # compare model output class
-        self.assertGreaterEqual(outputs["score"], 0.0)
-        self.assertIsInstance(outputs["answer"], str)
-
-    @parameterized.expand(
-        grid_parameters(
-            {"model_arch": SUPPORTED_ARCHITECTURES, "provider": ["CUDAExecutionProvider", "TensorrtExecutionProvider"]}
-        )
-    )
-    @require_torch_gpu
-    @pytest.mark.cuda_ep_test
-    @pytest.mark.trt_ep_test
-    def test_pipeline_on_gpu(self, test_name: str, model_arch: str, provider: str):
-        if provider == "TensorrtExecutionProvider" and model_arch != self.__class__.SUPPORTED_ARCHITECTURES[0]:
-            self.skipTest("testing a single arch for TensorrtExecutionProvider")
-
-        model_args = {"test_name": model_arch, "model_arch": model_arch}
-        self._setup(model_args)
-
-        model_id = MODEL_NAMES[model_arch]
-        onnx_model = ORTModelForQuestionAnswering.from_pretrained(self.onnx_model_dirs[model_arch], provider=provider)
-        tokenizer = get_preprocessor(model_id)
-        pipe = pipeline("question-answering", model=onnx_model, tokenizer=tokenizer, device=0)
-        question = "Whats my name?"
-        context = "My Name is Philipp and I live in Nuremberg."
-        outputs = pipe(question, context)
-        # check model device
-        self.assertEqual(pipe.model.device.type.lower(), "cuda")
-        # compare model output class
-        self.assertGreaterEqual(outputs["score"], 0.0)
-        self.assertTrue(isinstance(outputs["answer"], str))
-
-        gc.collect()
-
-    @parameterized.expand(
-        grid_parameters({"model_arch": SUPPORTED_ARCHITECTURES, "provider": ["ROCMExecutionProvider"]})
-    )
-    @require_torch_gpu
-    @require_ort_rocm
-    @pytest.mark.rocm_ep_test
-    def test_pipeline_on_rocm_ep(self, test_name: str, model_arch: str, provider: str):
-        provider = "ROCMExecutionProvider"
-        model_args = {"test_name": model_arch, "model_arch": model_arch}
-        self._setup(model_args)
-
-        model_id = MODEL_NAMES[model_arch]
-        onnx_model = ORTModelForQuestionAnswering.from_pretrained(self.onnx_model_dirs[model_arch], provider=provider)
-        tokenizer = get_preprocessor(model_id)
-        pipe = pipeline("question-answering", model=onnx_model, tokenizer=tokenizer, device=0)
-        question = "Whats my name?"
-        context = "My Name is Philipp and I live in Nuremberg."
-        outputs = pipe(question, context)
-        # check model device
-        self.assertEqual(pipe.model.device.type.lower(), "cuda")
-        # compare model output class
-        self.assertGreaterEqual(outputs["score"], 0.0)
-        self.assertTrue(isinstance(outputs["answer"], str))
 
         gc.collect()
 
@@ -2413,7 +2332,6 @@ class ORTModelForCTCIntegrationTest(ORTModelTestMixin):
     SUPPORTED_ARCHITECTURES = [  # noqa: RUF012
         "data2vec-audio",
         "hubert",
-        "mctct",
         "sew",
         "sew-d",
         "unispeech",
@@ -2933,3 +2851,36 @@ class TestBothExportersORTModel(unittest.TestCase):
                 f"For the task `{task}`, the ONNX export supports {supported_export_models}, but only {tested_architectures} are tested.\n"
                 f"    Missing {untested_architectures}."
             )
+
+
+class ORTPipelineReturnsORTModelsTest(unittest.TestCase):
+    """`pipeline()` must return ORT-backed pipelines, not torch ones.
+
+    This is the assertion the silent no-op slipped past: without it, a `pipeline()` that quietly
+    fell through to stock transformers model loading still produced correct-looking output.
+    """
+
+    @parameterized.expand(
+        [
+            ("feature-extraction", "bert", ORTModelForFeatureExtraction),
+            ("text-classification", "bert", ORTModelForSequenceClassification),
+            ("token-classification", "bert", ORTModelForTokenClassification),
+        ]
+    )
+    def test_pipeline_returns_ort_model(self, task: str, model_arch: str, expected_class):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            expected_class.from_pretrained(MODEL_NAMES[model_arch], export=True).save_pretrained(tmpdirname)
+            pipe = pipeline(task, model=tmpdirname, tokenizer=MODEL_NAMES[model_arch])
+
+            self.assertIsInstance(pipe.model, ORTModel)
+            self.assertIsInstance(pipe.model, expected_class)
+
+        gc.collect()
+
+    def test_pipeline_returns_ort_model_when_given_an_ort_model(self):
+        onnx_model = ORTModelForFeatureExtraction.from_pretrained(MODEL_NAMES["bert"], export=True)
+        pipe = pipeline("feature-extraction", model=onnx_model, tokenizer=MODEL_NAMES["bert"])
+
+        self.assertIsInstance(pipe.model, ORTModel)
+
+        gc.collect()

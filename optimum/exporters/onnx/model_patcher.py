@@ -39,16 +39,7 @@ if is_transformers_version(">=", "4.48"):
     from transformers.cache_utils import DynamicCache, EncoderDecoderCache
     from transformers.models.moonshine.modeling_moonshine import MoonshinePreTrainedModel
 if is_transformers_version(">=", "4.53"):
-    from transformers.masking_utils import (
-        ALL_MASK_ATTENTION_FUNCTIONS,
-        _ignore_causal_mask_sdpa,
-        and_masks,
-        causal_mask_function,
-        eager_mask,
-        padding_mask_function,
-        prepare_padding_mask,
-        sdpa_mask,
-    )
+    from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, eager_mask, sdpa_mask
     from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
 if is_transformers_version(">=", "4.53.1"):
     from transformers.masking_utils import find_packed_sequence_indices
@@ -395,63 +386,19 @@ def find_packed_sequence_indices_patched(position_ids: torch.Tensor) -> torch.Te
     return torch.zeros_like(position_ids)
 
 
-if is_transformers_version(">=", "4.53"):
-    _prepare_padding_mask_slice = "_slice" in inspect.signature(prepare_padding_mask).parameters
-else:
-    _prepare_padding_mask_slice = False
+# transformers' mask creation defaults to a non-vmap implementation, but forces `use_vmap=True`
+# whenever a model passes a custom `and_mask_function` / `or_mask_function` -- Falcon does this to
+# build its alibi mask, for example. vmap is not traceable, so the export dies inside functorch with
+# `RuntimeError: unordered_map::at: key not found`. These wrappers pin the stock v5 mask functions to
+# the index-based path for the duration of the export.
+def sdpa_mask_without_vmap(*args, **kwargs) -> torch.Tensor | None:
+    kwargs["use_vmap"] = False
+    return sdpa_mask(*args, **kwargs)
 
 
-# Custom vectorized implementation of sdpa_mask without using vmap
-def sdpa_mask_without_vmap(
-    batch_size: int,
-    cache_position: torch.Tensor,
-    kv_length: int,
-    kv_offset: int = 0,
-    mask_function: Callable | None = None,
-    attention_mask: torch.Tensor | None = None,
-    local_size: int | None = None,
-    allow_is_causal_skip: bool = True,
-    **kwargs,
-) -> torch.Tensor | None:
-    if mask_function is None:
-        mask_function = causal_mask_function
-
-    q_length = cache_position.shape[0]
-    # Potentially pad the 2D mask, and slice it correctly
-    if _prepare_padding_mask_slice:
-        padding_mask = prepare_padding_mask(attention_mask, kv_length, kv_offset, _slice=False)
-    else:
-        padding_mask = prepare_padding_mask(attention_mask, kv_length, kv_offset)
-
-    # Under specific conditions, we can avoid materializing the mask, instead relying on the `is_causal` argument
-    if allow_is_causal_skip and _ignore_causal_mask_sdpa(padding_mask, q_length, kv_length, kv_offset, local_size):
-        return None
-
-    # Potentially add the padding 2D mask
-    if padding_mask is not None:
-        mask_function = and_masks(mask_function, padding_mask_function(padding_mask))
-
-    # Create broadcatable indices
-    device = cache_position.device
-    q_indices = cache_position[None, None, :, None]
-    head_indices = torch.arange(1, dtype=torch.long, device=device)[None, :, None, None]
-    batch_indices = torch.arange(batch_size, dtype=torch.long, device=device)[:, None, None, None]
-    kv_indices = torch.arange(kv_length, dtype=torch.long, device=device)[None, None, None, :] + kv_offset
-    # Apply mask function element-wise through broadcasting
-    causal_mask = mask_function(batch_indices, head_indices, q_indices, kv_indices)
-    # Expand the mask to match batch size and query length if they weren't used in the mask function
-    causal_mask = causal_mask.expand(batch_size, -1, q_length, kv_length)
-
-    return causal_mask
-
-
-# Adapted from https://github.com/huggingface/transformers/blob/v4.53.0/src/transformers/masking_utils.py#L433
 def eager_mask_without_vmap(*args, **kwargs) -> torch.Tensor:
-    kwargs.pop("allow_is_causal_skip", None)
-    dtype = kwargs.get("dtype", torch.float32)
-    mask = sdpa_mask_without_vmap(*args, allow_is_causal_skip=False, **kwargs)
-    mask = torch.where(mask, torch.tensor(0.0, device=mask.device, dtype=dtype), torch.finfo(dtype).min)
-    return mask
+    kwargs["use_vmap"] = False
+    return eager_mask(*args, **kwargs)
 
 
 original_triu = torch.triu
@@ -687,8 +634,8 @@ class ModelPatcher:
             self.original_cache_class = transformers.cache_utils.Cache
             transformers.cache_utils.Cache = TraceableCache
 
-        # This is a workaround for mask generation in transformers >= 4.53.
-        # The masking process uses vmap which is not traceable by TorchScript.
+        # transformers re-enables vmap for models that pass a custom mask function; vmap is not
+        # traceable, so pin the stock mask functions to their index-based path during the export.
         if is_transformers_version(">=", "4.53"):
             ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask_without_vmap)
             ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask_without_vmap)

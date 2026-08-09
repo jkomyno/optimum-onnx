@@ -1,13 +1,8 @@
 name: ONNX Runtime / Python - Test
 
+# Hub-backed integration suite. Run manually when model-download quota is available.
 on:
-  push:
-    branches:
-      - main
-      - v*-release
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -26,7 +21,8 @@ jobs:
       matrix:
         python-version: [3.11]
         runs-on: [ubuntu-24.04]
-        transformers_version: [latest, 4.36.*, 4.45.*, 4.56.*]
+        # 5.14.* is the declared floor, latest is the early warning for intra-5.x churn.
+        transformers_version: [latest, 5.14.*]
         test_file:
           [
             test_decoder.py,
@@ -55,26 +51,14 @@ jobs:
           pip install --upgrade pip uv
           uv pip install .[tests,onnxruntime]
 
-      - name: Install diffusers for transformers ${{ matrix.transformers-version }}
+      - name: Install diffusers
         run: |
-          if [ "${{ matrix.transformers_version }}" == '4.36.*' ]; then
-            uv pip install "diffusers<0.32.0"
-          elif [ "${{ matrix.transformers_version }}" == '4.45.*' ]; then
-            uv pip install "diffusers<0.33.0"
-          else
-            uv pip install diffusers
-          fi
+          uv pip install diffusers
 
-      - name: Install transformers ${{ matrix.transformers-version }}
+      - name: Install transformers ${{ matrix.transformers_version }}
         run: |
-          if [ "${{ matrix.transformers_version }}" == '4.36.*' ]; then
-            uv pip install "transformers==4.36.*" "pytest<8.0.0"
-          elif [ "${{ matrix.transformers_version }}" == '4.45.*' ]; then
-            uv pip install "transformers==4.45.*"
-          elif [ "${{ matrix.transformers_version }}" == '4.56.*' ]; then
-            uv pip install "transformers==4.56.*"
-          elif [ "${{ matrix.transformers_version }}" != 'latest' ]; then
-            uv pip install "transformers==${{ matrix.transformers_version }}"            
+          if [ "${{ matrix.transformers_version }}" != 'latest' ]; then
+            uv pip install "transformers==${{ matrix.transformers_version }}"
           fi
 
       - name: Test with pytest

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import shutil
 import tempfile
 import unittest
@@ -21,7 +22,7 @@ from typing import Optional
 import numpy as np
 import torch
 from huggingface_hub import create_repo, delete_repo
-from transformers import set_seed
+from transformers import AutoFeatureExtractor, AutoProcessor, AutoTokenizer, set_seed
 
 from optimum.utils.import_utils import is_transformers_version
 
@@ -96,7 +97,6 @@ MODEL_NAMES = {
     "marian": "optimum-internal-testing/tiny-random-marian",
     "mbart": "hf-internal-testing/tiny-random-MBartModel",
     # "metaclip_2": "facebook/metaclip-2-mt5-worldwide-s16",
-    "mctct": "hf-internal-testing/tiny-random-MCTCTModel",
     "mgp-str": "hf-internal-testing/tiny-random-MgpstrForSceneTextRecognition",
     "mistral": "echarlaix/tiny-random-mistral",
     "mobilebert": "hf-internal-testing/tiny-random-MobileBertModel",
@@ -242,3 +242,29 @@ def select_architecture_transformer_version(arch_list: list[str | tuple[str, str
             new_list.append(arch[0])
             continue
     return new_list
+
+
+def get_preprocessor(model_name: str) -> AutoTokenizer | AutoFeatureExtractor | AutoProcessor | None:
+    """Loads the preprocessor a model needs, picking the right Auto class.
+
+    This used to live in `transformers.onnx.utils`, a module transformers v5 removed along with the
+    rest of its built-in ONNX export. The behaviour is kept identical so the call sites do not have
+    to change: prefer a processor, otherwise fall back to whichever of tokenizer / feature extractor
+    the model has exactly one of.
+    """
+    try:
+        return AutoProcessor.from_pretrained(model_name)
+    except (ValueError, OSError, KeyError):
+        tokenizer, feature_extractor = None, None
+        with contextlib.suppress(OSError, KeyError):
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+        with contextlib.suppress(OSError, KeyError):
+            feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+
+        if tokenizer is not None and feature_extractor is not None:
+            raise ValueError(
+                f"Couldn't auto-detect preprocessor for {model_name}. Found both a tokenizer and a feature extractor."
+            )
+        if tokenizer is None and feature_extractor is None:
+            return None
+        return tokenizer if tokenizer is not None else feature_extractor

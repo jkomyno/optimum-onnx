@@ -1,0 +1,76 @@
+name: Transformers v5 / Offline Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - v*-release
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  HF_HOME: /tmp/huggingface-offline
+  HF_HUB_OFFLINE: 1
+  TRANSFORMERS_OFFLINE: 1
+  UV_SYSTEM_PYTHON: true
+  UV_TORCH_BACKEND: cpu
+
+jobs:
+  package:
+    name: installable wheel
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.11"
+
+      - name: Build and install the wheel
+        run: |
+          pip install uv
+          uv build --wheel
+          uv venv .ci-venv
+          uv pip install --python .ci-venv/bin/python dist/*.whl onnxruntime
+
+      - name: Import the installed package
+        run: |
+          .ci-venv/bin/python -c "import optimum.onnx, optimum.exporters.onnx, optimum.onnxruntime"
+
+  compatibility:
+    name: offline export and runtime (${{ matrix.transformers_version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        transformers_version: ["5.14.*", latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          pip install uv
+          uv pip install ".[onnxruntime]" pytest
+          if [ "${{ matrix.transformers_version }}" != "latest" ]; then
+            uv pip install "transformers==${{ matrix.transformers_version }}"
+          fi
+
+      - name: Run deterministic compatibility tests
+        run: |
+          pytest tests/transformers_v5/test_offline_compatibility.py -v -rf

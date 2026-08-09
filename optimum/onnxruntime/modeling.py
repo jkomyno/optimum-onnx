@@ -602,6 +602,29 @@ class ORTModel(ORTSessionMixin, OptimizedModel):
         """Returns whether this model can generate sequences with `.generate()`."""
         return isinstance(self, GenerationMixin)
 
+    @classmethod
+    def is_remote_code(cls) -> bool:
+        """Returns whether this model is custom code loaded from the Hub.
+
+        `GenerationMixin.prepare_inputs_for_generation` calls this, but it is defined on
+        `PreTrainedModel`, which ORT models deliberately do not inherit from. ORT models are
+        always loaded from ONNX artifacts by this library, never from remote code, so this is
+        always `False`.
+        """
+        return False
+
+    def get_experts_implementation(self) -> dict[str, str | None]:
+        """Returns the MoE experts implementation of this model, as `GenerationMixin` expects it.
+
+        `GenerationMixin._optimize_model_for_decode` snapshots this to decide whether to swap
+        `grouped_mm` for `batched_mm` during decoding. That swap rewrites torch module internals,
+        which cannot apply to an ONNX graph that was frozen at export time. Reporting `None`
+        keeps the swap (and the `set_experts_implementation` call that would follow it) from ever
+        being attempted, instead of mirroring `PreTrainedModel` and letting it mutate a config
+        the inference session does not read.
+        """
+        return {"": None}
+
     def _warn_on_unhandled_inputs(self, kwargs: dict[str, Any]) -> None:
         """Warn about unhandled input arguments.
 
@@ -859,19 +882,6 @@ QUESTION_ANSWERING_EXAMPLE = r"""
     >>> outputs = model(**inputs, start_positions=start_positions, end_positions=end_positions)
     >>> start_scores = outputs.start_logits
     >>> end_scores = outputs.end_logits
-    ```
-    Example using `transformers.pipeline`:
-
-    ```python
-    >>> from transformers import {processor_class}, pipeline
-    >>> from optimum.onnxruntime import {model_class}
-
-    >>> tokenizer = {processor_class}.from_pretrained("{checkpoint}")
-    >>> model = {model_class}.from_pretrained("{checkpoint}")
-    >>> onnx_qa = pipeline("question-answering", model=model, tokenizer=tokenizer)
-
-    >>> question, text = "Who was Jim Henson?", "Jim Henson was a nice puppet"
-    >>> pred = onnx_qa(question, text)
     ```
 """
 

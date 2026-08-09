@@ -22,6 +22,7 @@ import torch
 import transformers.pipelines
 from transformers import AutoConfig, Pipeline
 from transformers import pipeline as transformers_pipeline
+from transformers.pipelines import TASK_ALIASES
 
 from optimum.utils import is_onnxruntime_available, is_transformers_version
 from optimum.utils.logging import get_logger
@@ -47,19 +48,18 @@ if is_onnxruntime_available():
         ORTModelForCTC,
         ORTModelForFeatureExtraction,
         ORTModelForImageClassification,
-        ORTModelForImageToImage,
         ORTModelForMaskedLM,
-        ORTModelForQuestionAnswering,
         ORTModelForSemanticSegmentation,
-        ORTModelForSeq2SeqLM,
         ORTModelForSequenceClassification,
         ORTModelForSpeechSeq2Seq,
         ORTModelForTokenClassification,
-        ORTModelForVision2Seq,
         ORTModelForZeroShotImageClassification,
     )
     from optimum.onnxruntime.modeling import ORTModel
 
+    # Only tasks that exist in transformers.pipelines.SUPPORTED_TASKS can be registered here:
+    # anything else would advertise a task that raises inside transformers. See
+    # `REMOVED_IN_TRANSFORMERS_V5` for the tasks this mapping used to carry.
     ORT_TASKS_MAPPING = {
         "audio-classification": (ORTModelForAudioClassification,),
         "automatic-speech-recognition": (ORTModelForCTC, ORTModelForSpeechSeq2Seq),
@@ -67,15 +67,9 @@ if is_onnxruntime_available():
         "fill-mask": (ORTModelForMaskedLM,),
         "image-classification": (ORTModelForImageClassification,),
         "image-segmentation": (ORTModelForSemanticSegmentation,),  # TODO: we need to add ORTModelForImageSegmentation
-        "image-to-image": (ORTModelForImageToImage,),
-        "image-to-text": (ORTModelForVision2Seq,),
-        "question-answering": (ORTModelForQuestionAnswering,),
-        "summarization": (ORTModelForSeq2SeqLM,),
-        "text2text-generation": (ORTModelForSeq2SeqLM,),
         "text-classification": (ORTModelForSequenceClassification,),
         "text-generation": (ORTModelForCausalLM,),
         "token-classification": (ORTModelForTokenClassification,),
-        "translation": (ORTModelForSeq2SeqLM,),
         "zero-shot-classification": (ORTModelForSequenceClassification,),
         "zero-shot-image-classification": (ORTModelForZeroShotImageClassification,),
     }
@@ -83,16 +77,49 @@ else:
     ORT_TASKS_MAPPING = {}
 
 
+# Pipeline tasks transformers v5 removed. The corresponding ORT model classes and export tasks are
+# unaffected -- only the pipeline registrations are gone -- so point users at the model classes.
+REMOVED_IN_TRANSFORMERS_V5 = {
+    "image-to-image": "ORTModelForImageToImage",
+    "image-to-text": "ORTModelForVision2Seq",
+    "question-answering": "ORTModelForQuestionAnswering",
+    "summarization": "ORTModelForSeq2SeqLM",
+    "text2text-generation": "ORTModelForSeq2SeqLM",
+    "translation": "ORTModelForSeq2SeqLM",
+}
+
+
+def normalize_task(task: str) -> str:
+    """Resolves `task` to its `ORT_TASKS_MAPPING` key, raising if it cannot be served.
+
+    Aliases (`ner`, `sentiment-analysis`, ...) have to be resolved here because transformers passes
+    the task through to the model loader verbatim. Unsupported tasks raise here rather than as a
+    bare `KeyError` from transformers' own registry, which gives no hint that the ORT model class
+    still exists for the tasks v5 removed as pipelines.
+    """
+    normalized_task = TASK_ALIASES.get(task, task)
+    if normalized_task.startswith("translation"):
+        normalized_task = "translation"
+
+    if normalized_task in ORT_TASKS_MAPPING:
+        return normalized_task
+
+    if normalized_task in REMOVED_IN_TRANSFORMERS_V5:
+        raise ValueError(
+            f"Task '{task}' is no longer available as a pipeline: transformers v5 removed it. "
+            f"`{REMOVED_IN_TRANSFORMERS_V5[normalized_task]}` still supports this model family, so "
+            "use it directly instead of through `pipeline`. Exporting to this task is unaffected."
+        )
+
+    raise ValueError(
+        f"Task '{task}' is not supported by ONNX Runtime. Only {sorted(ORT_TASKS_MAPPING)} are supported."
+    )
+
+
 def get_ort_model_class(
     task: str, config: PretrainedConfig | None = None, model_id: str | None = None, **model_kwargs
 ):
-    if task.startswith("translation_"):
-        task = "translation"
-
-    if task not in ORT_TASKS_MAPPING:
-        raise KeyError(
-            f"Task '{task}' is not supported by ONNX Runtime. Only {list(ORT_TASKS_MAPPING.keys())} are supported."
-        )
+    task = normalize_task(task)
 
     if task == "automatic-speech-recognition":
         if config is None:
@@ -112,15 +139,20 @@ def get_ort_model_class(
     return ort_model_class
 
 
-# a modified transformers.pipelines.base.infer_framework_load_model that loads ORT models
-def ort_infer_framework_load_model(
-    model, config: PretrainedConfig | None = None, task: str | None = None, **model_kwargs
+# a modified transformers.pipelines.base.load_model that loads ORT models
+def ort_load_model(
+    model,
+    config: PretrainedConfig | None = None,
+    model_classes: tuple[type, ...] | None = None,
+    task: str | None = None,
+    **model_kwargs,
 ):
     if isinstance(model, str):
         model_kwargs.pop("framework", None)
+        model_kwargs.pop("dtype", None)  # not supported for ORTModel
         model_kwargs.pop("torch_dtype", None)  # not supported for ORTModel
         model_kwargs.pop("_commit_hash", None)  # not supported for ORTModel
-        model_kwargs.pop("model_classes", None)
+        model_kwargs.pop("_from_pipeline", None)  # not supported for ORTModel
         ort_model_class = get_ort_model_class(task, config, model, **model_kwargs)
         ort_model = ort_model_class.from_pretrained(model, **model_kwargs)
     elif isinstance(model, ORTModel):
@@ -131,24 +163,30 @@ def ort_infer_framework_load_model(
             You can also provide None as the model to use a default one."""
         )
 
-    return "pt", ort_model
+    return ort_model
 
 
 @contextlib.contextmanager
 def patch_pipelines_to_load_ort_model():
-    if hasattr(transformers.pipelines, "infer_framework_load_model"):
-        original_infer_framework_load_model = transformers.pipelines.infer_framework_load_model
+    # `transformers.pipelines.pipeline` resolves `load_model` in its own module namespace, so the
+    # patch has to go there rather than on `transformers.pipelines.base`, which would also capture
+    # the unrelated assistant-model load. If the hook is ever renamed again, raise instead of
+    # yielding: an unpatched `pipeline()` silently returns a torch model while the caller believes
+    # it is ORT-backed, which is worse than failing.
+    if not hasattr(transformers.pipelines, "load_model"):
+        raise RuntimeError(
+            "Could not patch `transformers.pipelines.load_model`, which "
+            f"`optimum.onnxruntime.pipeline` needs in order to load ONNX Runtime models. "
+            f"transformers {transformers.__version__} does not expose it. Please open an issue at "
+            "https://github.com/huggingface/optimum-onnx/issues."
+        )
 
-        transformers.pipelines.infer_framework_load_model = ort_infer_framework_load_model
-        try:
-            yield
-        finally:
-            transformers.pipelines.infer_framework_load_model = original_infer_framework_load_model
-    else:
-        try:
-            yield
-        finally:
-            pass
+    original_load_model = transformers.pipelines.load_model
+    transformers.pipelines.load_model = ort_load_model
+    try:
+        yield
+    finally:
+        transformers.pipelines.load_model = original_load_model
 
 
 # The docstring is simply a copy of transformers.pipelines.pipeline's doc with minor modifications
@@ -195,35 +233,16 @@ def pipeline(  # noqa: D417
 
             - `"audio-classification"`: will return a [`AudioClassificationPipeline`].
             - `"automatic-speech-recognition"`: will return a [`AutomaticSpeechRecognitionPipeline`].
-            - `"depth-estimation"`: will return a [`DepthEstimationPipeline`].
-            - `"document-question-answering"`: will return a [`DocumentQuestionAnsweringPipeline`].
             - `"feature-extraction"`: will return a [`FeatureExtractionPipeline`].
             - `"fill-mask"`: will return a [`FillMaskPipeline`]:.
             - `"image-classification"`: will return a [`ImageClassificationPipeline`].
-            - `"image-feature-extraction"`: will return an [`ImageFeatureExtractionPipeline`].
             - `"image-segmentation"`: will return a [`ImageSegmentationPipeline`].
-            - `"image-text-to-text"`: will return a [`ImageTextToTextPipeline`].
-            - `"image-to-image"`: will return a [`ImageToImagePipeline`].
-            - `"image-to-text"`: will return a [`ImageToTextPipeline`].
-            - `"mask-generation"`: will return a [`MaskGenerationPipeline`].
-            - `"object-detection"`: will return a [`ObjectDetectionPipeline`].
-            - `"question-answering"`: will return a [`QuestionAnsweringPipeline`].
-            - `"summarization"`: will return a [`SummarizationPipeline`].
-            - `"table-question-answering"`: will return a [`TableQuestionAnsweringPipeline`].
-            - `"text2text-generation"`: will return a [`Text2TextGenerationPipeline`].
             - `"text-classification"` (alias `"sentiment-analysis"` available): will return a
               [`TextClassificationPipeline`].
             - `"text-generation"`: will return a [`TextGenerationPipeline`]:.
-            - `"text-to-audio"` (alias `"text-to-speech"` available): will return a [`TextToAudioPipeline`]:.
             - `"token-classification"` (alias `"ner"` available): will return a [`TokenClassificationPipeline`].
-            - `"translation"`: will return a [`TranslationPipeline`].
-            - `"translation_xx_to_yy"`: will return a [`TranslationPipeline`].
-            - `"video-classification"`: will return a [`VideoClassificationPipeline`].
-            - `"visual-question-answering"`: will return a [`VisualQuestionAnsweringPipeline`].
             - `"zero-shot-classification"`: will return a [`ZeroShotClassificationPipeline`].
             - `"zero-shot-image-classification"`: will return a [`ZeroShotImageClassificationPipeline`].
-            - `"zero-shot-audio-classification"`: will return a [`ZeroShotAudioClassificationPipeline`].
-            - `"zero-shot-object-detection"`: will return a [`ZeroShotObjectDetectionPipeline`].
 
         model (`str` or [`ORTModel`], *optional*):
             The model that will be used by the pipeline to make predictions. This can be a model identifier or an
@@ -323,9 +342,9 @@ def pipeline(  # noqa: D417
     >>> # Sentiment analysis pipeline
     >>> analyzer = pipeline("sentiment-analysis")
 
-    >>> # Question answering pipeline, specifying the checkpoint identifier
-    >>> oracle = pipeline(
-    ...     "question-answering", model="distilbert/distilbert-base-cased-distilled-squad", tokenizer="google-bert/bert-base-cased"
+    >>> # Fill-mask pipeline, specifying the checkpoint identifier
+    >>> unmasker = pipeline(
+    ...     "fill-mask", model="google-bert/bert-base-uncased", tokenizer="google-bert/bert-base-uncased"
     ... )
 
     >>> # Named entity recognition pipeline, passing in a specific model and tokenizer
@@ -344,6 +363,10 @@ def pipeline(  # noqa: D417
     if is_transformers_version(">=", "4.46.0"):
         # processor argument was added in transformers v4.46.0
         version_dependent_kwargs["processor"] = processor
+
+    if task is not None:
+        # Fail before delegating, so an unsupported task does not surface as a transformers KeyError.
+        normalize_task(task)
 
     with patch_pipelines_to_load_ort_model():
         pipeline_with_ort_model = transformers_pipeline(

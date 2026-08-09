@@ -455,8 +455,6 @@ class ORTModelForSeq2SeqLMIntegrationTest(ORTSeq2SeqTestMixin):
 
         tokenizer = self.get_tokenizer(model_arch)
         inputs = tokenizer(texts, return_tensors="pt", padding=True)
-        if for_generation and is_transformers_version(">=", "4.51.0"):
-            inputs["use_model_defaults"] = False
         if not for_generation:
             size = (next(iter(inputs.values())).shape[0], 10)
             inputs["decoder_input_ids"] = torch.randint(0, 100, size)
@@ -968,8 +966,6 @@ class ORTModelForSpeechSeq2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         else:
             inputs = feature_extractor(audios, return_tensors="pt", padding=True, return_attention_mask=True)
 
-        if for_generation and is_transformers_version(">=", "4.51.0"):
-            inputs["use_model_defaults"] = False
         if not for_generation:
             size = (next(iter(inputs.values())).shape[0], 10)
             inputs["decoder_input_ids"] = torch.randint(0, 100, size)
@@ -1199,7 +1195,7 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         # "vision-encoder-decoder-trocr",
     ]
 
-    TASK = "image-to-text" if is_transformers_version("<", "5.0") else "image-text-to-text"
+    TASK = "image-text-to-text"
     ORTMODEL_CLASS = ORTModelForVision2Seq
     AUTOMODEL_CLASS = AutoModelForVision2Seq
 
@@ -1231,8 +1227,6 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
 
         inputs = image_processor(images, return_tensors="pt")
 
-        if for_generation and is_transformers_version(">=", "4.51.0"):
-            inputs["use_model_defaults"] = False
         if not for_generation:
             size = (next(iter(inputs.values())).shape[0], 10)
             inputs["decoder_input_ids"] = torch.randint(0, 100, size)
