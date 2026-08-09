@@ -23,30 +23,23 @@ from typing import TYPE_CHECKING, Any, Callable
 import torch
 import transformers
 from torch.onnx import symbolic_helper
+from transformers.cache_utils import DynamicCache, DynamicLayer, EncoderDecoderCache
+from transformers.masking_utils import (
+    ALL_MASK_ATTENTION_FUNCTIONS,
+    eager_mask,
+    find_packed_sequence_indices,
+    sdpa_mask,
+)
 from transformers.modeling_outputs import BaseModelOutput
+from transformers.models.cohere.modeling_cohere import CohereRotaryEmbedding
+from transformers.models.gpt_oss.modeling_gpt_oss import GptOssExperts
+from transformers.models.moonshine.modeling_moonshine import MoonshinePreTrainedModel
+from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
 from transformers.models.speecht5.modeling_speecht5 import SpeechT5EncoderWithSpeechPrenet
 
-from optimum.utils import is_diffusers_version, is_torch_version, is_transformers_version, logging
+from optimum.exporters.onnx._traceable_decorator import traceable_check_model_inputs
+from optimum.utils import is_diffusers_version, is_torch_version, logging
 
-
-if is_transformers_version(">=", "4.44") and is_transformers_version("<", "4.50"):
-    from optimum.exporters.onnx._traceable_cache import TraceableCache
-if is_transformers_version(">=", "4.54"):
-    from optimum.exporters.onnx._traceable_decorator import traceable_check_model_inputs
-if is_transformers_version(">=", "4.43") and is_transformers_version("<", "4.48"):
-    from transformers.models.clip.modeling_clip import CLIPAttention, CLIPSdpaAttention
-if is_transformers_version(">=", "4.48"):
-    from transformers.cache_utils import DynamicCache, EncoderDecoderCache
-    from transformers.models.moonshine.modeling_moonshine import MoonshinePreTrainedModel
-if is_transformers_version(">=", "4.53"):
-    from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, eager_mask, sdpa_mask
-    from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeSparseMoeBlock
-if is_transformers_version(">=", "4.53.1"):
-    from transformers.masking_utils import find_packed_sequence_indices
-if is_transformers_version(">=", "4.55"):
-    from transformers.models.gpt_oss.modeling_gpt_oss import GptOssExperts
-if is_transformers_version(">=", "4.56"):
-    from transformers.cache_utils import DynamicLayer
 
 if is_diffusers_version(">=", "0.35.0"):
     import diffusers.models.transformers.transformer_flux
@@ -183,18 +176,14 @@ def override_arguments(args, kwargs, forward_signature, model_kwargs: dict[str, 
 
 
 def preprocess_encoder_outputs(encoder_outputs):
-    if is_transformers_version(">=", "4.54") and isinstance(encoder_outputs, (list, tuple)):
+    if isinstance(encoder_outputs, (list, tuple)):
         encoder_outputs = BaseModelOutput(*encoder_outputs)
 
     return encoder_outputs
 
 
 def preprocess_past_key_values(past_key_values):
-    if (
-        is_transformers_version(">=", "4.48")
-        and isinstance(past_key_values, (list, tuple))
-        and isinstance(past_key_values[0], (list, tuple))
-    ):
+    if isinstance(past_key_values, (list, tuple)) and isinstance(past_key_values[0], (list, tuple)):
         if len(past_key_values[0]) == 2:
             if hasattr(DynamicCache, "from_legacy_cache"):
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
@@ -217,7 +206,7 @@ def preprocess_past_key_values(past_key_values):
 
 
 def postprocess_past_key_values(past_key_values, output_names: list[str]):
-    if is_transformers_version(">=", "4.48") and isinstance(past_key_values, (EncoderDecoderCache, DynamicCache)):
+    if isinstance(past_key_values, (EncoderDecoderCache, DynamicCache)):
         if hasattr(past_key_values, "to_legacy_cache"):
             past_key_values = past_key_values.to_legacy_cache()
         elif isinstance(past_key_values, DynamicCache):
@@ -522,7 +511,7 @@ class ModelPatcher:
         self.orig_forward_name = "forward" if hasattr(self._model, "forward") else "call"
         self.orig_forward = getattr(self._model, self.orig_forward_name)
 
-        if is_transformers_version(">=", "4.54") and hasattr(self.orig_forward, "__wrapped__"):
+        if hasattr(self.orig_forward, "__wrapped__"):
             # the original check_model_inputs has some failing cases that we fix in traceable_check_model_inputs
             # we fix those issues in a PR in transformers https://github.com/huggingface/transformers/pull/40811
             # issues are: support for positional args (use_cache for instance) and fix for _CAN_RECORD_REGISTRY
@@ -627,49 +616,31 @@ class ModelPatcher:
         self.patch_ops()
         setattr(self._model, self.orig_forward_name, self.patched_forward)
 
-        # This is a workaround for the Cache class in transformers, we replace it
-        # with traceable cache is because the original one used in transformers
-        # inherited from nn.Module (for a couple versions), which can't be traced as input.
-        if is_transformers_version(">=", "4.44") and is_transformers_version("<", "4.50"):
-            self.original_cache_class = transformers.cache_utils.Cache
-            transformers.cache_utils.Cache = TraceableCache
-
         # transformers re-enables vmap for models that pass a custom mask function; vmap is not
         # traceable, so pin the stock mask functions to their index-based path during the export.
-        if is_transformers_version(">=", "4.53"):
-            ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask_without_vmap)
-            ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask_without_vmap)
+        ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask_without_vmap)
+        ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask_without_vmap)
 
         # This is a workaround for the find_packed_sequence_indices function in transformers which
         # should only return a tensor of zeros with the same shape as position_ids indicating no packed sequence indices.
         # The function uses torch.diff which is not traceable by TorchScript.
-        if is_transformers_version(">=", "4.53.1"):
-            self.original_find_packed_sequence_indices = find_packed_sequence_indices
-            transformers.masking_utils.find_packed_sequence_indices = find_packed_sequence_indices_patched
+        self.original_find_packed_sequence_indices = find_packed_sequence_indices
+        transformers.masking_utils.find_packed_sequence_indices = find_packed_sequence_indices_patched
 
         # Starting from transformers 4.56.0, DynamicCache uses DynamicLayer which has an update method
         # that uses torch.cat to concatenate an empty tensor with the key/value states during the first call.
         # This causes issues during TorchScript tracing.
-        if is_transformers_version(">=", "4.56"):
-            self.original_dynamic_layer_update = DynamicLayer.update
-            DynamicLayer.update = patched_dynamic_layer_update
+        self.original_dynamic_layer_update = DynamicLayer.update
+        DynamicLayer.update = patched_dynamic_layer_update
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.restore_ops()
         setattr(self._model, self.orig_forward_name, self.orig_forward)
 
-        if is_transformers_version(">=", "4.44") and is_transformers_version("<", "4.50"):
-            transformers.cache_utils.Cache = self.original_cache_class
-
-        if is_transformers_version(">=", "4.53"):
-            ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask)
-            ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask)
-
-        if is_transformers_version(">=", "4.53.1"):
-            transformers.masking_utils.find_packed_sequence_indices = self.original_find_packed_sequence_indices
-
-        if is_transformers_version(">=", "4.56"):
-            DynamicLayer.update = self.original_dynamic_layer_update
+        ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask)
+        ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask)
+        transformers.masking_utils.find_packed_sequence_indices = self.original_find_packed_sequence_indices
+        DynamicLayer.update = self.original_dynamic_layer_update
 
     def __call__(self, *args, **kwargs):
         if getattr(self._model, self.orig_forward_name) is self.orig_forward:
@@ -1150,16 +1121,7 @@ class MetaCLIP2Patcher(ModelPatcher):
 
 
 class CLIPModelPatcher(ModelPatcher):
-    def __enter__(self):
-        super().__enter__()
-        if is_transformers_version(">=", "4.43") and is_transformers_version("<", "4.48"):
-            self.original_sdpa_forward = CLIPSdpaAttention.forward
-            CLIPSdpaAttention.forward = CLIPAttention.forward
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        super().__exit__(exc_type, exc_value, traceback)
-        if is_transformers_version(">=", "4.43") and is_transformers_version("<", "4.48"):
-            CLIPSdpaAttention.forward = self.original_sdpa_forward
+    pass
 
 
 class VitPoseModelPatcher(ModelPatcher):
@@ -1227,15 +1189,13 @@ class Qwen3MoeModelPatcher(ModelPatcher):
         # The forward method of the Moe Sparse block is patched to avoid looping only on the experts that are selected
         # by the router, which fails during execution in ONNX Runtime.
         # TODO: investigate more on this issue.
-        if is_transformers_version(">=", "4.53"):
-            self.original_moe_forward = Qwen3MoeSparseMoeBlock.forward
-            Qwen3MoeSparseMoeBlock.forward = qwen3_moe_forward_patched
+        self.original_moe_forward = Qwen3MoeSparseMoeBlock.forward
+        Qwen3MoeSparseMoeBlock.forward = qwen3_moe_forward_patched
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
 
-        if is_transformers_version(">=", "4.53"):
-            Qwen3MoeSparseMoeBlock.forward = self.original_moe_forward
+        Qwen3MoeSparseMoeBlock.forward = self.original_moe_forward
 
 
 # This is a traceable version of the original function,
@@ -1251,16 +1211,14 @@ class MoonshineModelPatcher(ModelPatcher):
     def __enter__(self):
         super().__enter__()
 
-        if is_transformers_version(">=", "4.48"):
-            self.original_feat_extract_output_lengths = MoonshinePreTrainedModel._get_feat_extract_output_lengths
-            MoonshinePreTrainedModel._get_feat_extract_output_lengths = _get_feat_extract_output_lengths_patched
+        self.original_feat_extract_output_lengths = MoonshinePreTrainedModel._get_feat_extract_output_lengths
+        MoonshinePreTrainedModel._get_feat_extract_output_lengths = _get_feat_extract_output_lengths_patched
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
 
-        if is_transformers_version(">=", "4.48"):
-            MoonshinePreTrainedModel._get_feat_extract_output_lengths = self.original_feat_extract_output_lengths
-            del self.original_feat_extract_output_lengths
+        MoonshinePreTrainedModel._get_feat_extract_output_lengths = self.original_feat_extract_output_lengths
+        del self.original_feat_extract_output_lengths
 
 
 # This is a traceabe of the original function,
@@ -1358,19 +1316,13 @@ class CohereModelPatcher(ModelPatcher):
     def __enter__(self):
         super().__enter__()
 
-        if is_transformers_version(">=", "4.38.0"):
-            from transformers.models.cohere.modeling_cohere import CohereRotaryEmbedding
-
-            self.original_forward = CohereRotaryEmbedding.forward
-            CohereRotaryEmbedding.forward = patched_cohere_rotary_forward
+        self.original_forward = CohereRotaryEmbedding.forward
+        CohereRotaryEmbedding.forward = patched_cohere_rotary_forward
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
 
-        if is_transformers_version(">=", "4.38.0"):
-            from transformers.models.cohere.modeling_cohere import CohereRotaryEmbedding
-
-            CohereRotaryEmbedding.forward = self.original_forward
+        CohereRotaryEmbedding.forward = self.original_forward
 
 
 # Copied from https://github.com/huggingface/transformers/blob/v4.56.0/src/transformers/models/gpt_oss/modeling_gpt_oss.py#L81
@@ -1397,12 +1349,10 @@ class GptOssModelPatcher(ModelPatcher):
     def __enter__(self):
         super().__enter__()
 
-        if is_transformers_version(">=", "4.55.0"):
-            self.original_gpt_oss_forward = GptOssExperts.forward
-            GptOssExperts.forward = gpt_oss_forward
+        self.original_gpt_oss_forward = GptOssExperts.forward
+        GptOssExperts.forward = gpt_oss_forward
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
 
-        if is_transformers_version(">=", "4.55.0"):
-            GptOssExperts.forward = self.original_gpt_oss_forward
+        GptOssExperts.forward = self.original_gpt_oss_forward

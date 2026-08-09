@@ -23,7 +23,7 @@ from transformers.utils import is_torch_available
 from optimum.exporters.base import ExporterConfig
 from optimum.exporters.tasks import TasksManager
 from optimum.exporters.utils import _get_submodels_and_export_configs
-from optimum.utils.import_utils import is_diffusers_available, is_transformers_version
+from optimum.utils.import_utils import is_diffusers_available
 
 
 if TYPE_CHECKING:
@@ -63,11 +63,8 @@ MODEL_TYPES_REQUIRING_POSITION_IDS = {
     "stablelm",
     "olmo2",
     "olmo",
+    "opt",
 }
-
-
-if is_transformers_version(">=", "4.46.0"):
-    MODEL_TYPES_REQUIRING_POSITION_IDS.add("opt")
 
 
 def recursive_to_device(value: tuple | list | torch.Tensor, device: str):

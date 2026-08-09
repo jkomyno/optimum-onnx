@@ -25,6 +25,7 @@ import torch
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from transformers import AutoModelForCausalLM, GenerationConfig
 from transformers.file_utils import add_end_docstrings, add_start_docstrings_to_model_forward
+from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from onnxruntime import InferenceSession, SessionOptions
@@ -42,19 +43,12 @@ from optimum.onnxruntime.constants import (
 )
 from optimum.onnxruntime.modeling import ONNX_MODEL_END_DOCSTRING, ORTModel
 from optimum.onnxruntime.utils import prepare_providers_and_provider_options
-from optimum.utils import is_transformers_version
 from optimum.utils.file_utils import find_files_matching_pattern
 from optimum.utils.save_utils import maybe_save_preprocessors
 
 
 if TYPE_CHECKING:
     from transformers import PretrainedConfig
-
-if is_transformers_version(">=", "4.25.0"):
-    from transformers.generation import GenerationMixin
-else:
-    from transformers.generation_utils import GenerationMixin  # type: ignore
-
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +158,6 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
         self.old_bloom_modeling = self.config.model_type == "bloom" and (
             len(self.input_shapes.get("past_key_values.0.key", ())) == 3
             or len(self.output_shapes.get("past_key_values.0.key", ())) == 3
-            or is_transformers_version("<", "4.44.0")
         )  # Old Bloom style
         if self.can_use_cache and self.old_bloom_modeling:
             logger.warning(
@@ -176,7 +169,6 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
         self.old_gpt_bigcode_modeling = self.config.model_type == "gpt_bigcode" and (
             self.input_shapes.get("past_key_values.0.key_value", None) is not None
             or self.output_shapes.get("past_key_values.0.key_value", None) is not None
-            or is_transformers_version("<", "4.54.0")
         )  # Old GPT BigCode style
         if self.can_use_cache and self.old_gpt_bigcode_modeling:
             logger.warning(
@@ -429,56 +421,6 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
 
         return CausalLMOutputWithPast(logits=logits, past_key_values=past_key_values)
 
-    def prepare_inputs_for_generation(self, *args, **kwargs):
-        if is_transformers_version("<", "4.46.0"):
-            return self._prepare_inputs_for_generation_legacy(*args, **kwargs)
-        else:
-            return super().prepare_inputs_for_generation(*args, **kwargs)
-
-    # Adapted from transformers.models.gpt_bigcode.modeling_gpt_bigcode.GPTBigCodeForCausalLM.prepare_inputs_for_generation
-    def _prepare_inputs_for_generation_legacy(
-        self,
-        input_ids,
-        attention_mask=None,
-        past_key_values=None,
-        cache_position=None,
-        position_ids=None,
-        use_cache=None,
-        **kwargs,
-    ):
-        if past_key_values is not None:
-            if self.old_gpt_bigcode_modeling:
-                # (before v4.54) GPT BigCode fuses keys and values in one tensor
-                past_seq_len = past_key_values[0].shape[-2]
-            else:
-                # We use the past value and not key to be compatible with bloom cache
-                past_seq_len = past_key_values[0][1].shape[-2]
-
-            if input_ids.shape[1] > past_seq_len:
-                remove_prefix_length = past_seq_len
-            else:
-                remove_prefix_length = input_ids.shape[1] - 1
-
-            input_ids = input_ids[:, remove_prefix_length:]
-
-        # falcon, gpt_bigcode, and other models used to override the prepare_inputs_for_generation method to add this logic
-        # https://github.com/huggingface/transformers/blob/v4.40.0/src/transformers/models/gpt_bigcode/modeling_gpt_bigcode.py#L1186
-        if "position_ids" in self.input_names and position_ids is None and attention_mask is not None:
-            # create position_ids on the fly for batch generation
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-            if past_key_values:
-                position_ids = position_ids[:, -1].unsqueeze(-1)
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "past_key_values": past_key_values,
-            "cache_position": cache_position,
-            "position_ids": position_ids,
-            "use_cache": use_cache,
-        }
-
     @staticmethod
     def _reorder_cache(
         past_key_values: tuple[tuple[torch.Tensor]] | tuple[torch.Tensor],
@@ -665,18 +607,6 @@ class ORTModelForCausalLM(ORTModel, GenerationMixin):
         generation_config.use_cache = use_cache
         if hasattr(generation_config, "cache_implementation"):
             generation_config.cache_implementation = None
-
-        if is_transformers_version(">=", "4.45.0") and is_transformers_version("<", "4.99"):
-            misplaced_generation_parameters = config._get_non_default_generation_parameters()
-            if len(misplaced_generation_parameters) > 0:
-                logger.warning(
-                    "Moving the following attributes in the config to the generation config: "
-                    f"{misplaced_generation_parameters}. You are seeing this warning because you've set "
-                    "generation parameters in the model config, as opposed to in the generation config.",
-                )
-                for param_name, param_value in misplaced_generation_parameters.items():
-                    setattr(generation_config, param_name, param_value)
-                    setattr(config, param_name, None)
 
         providers, provider_options = prepare_providers_and_provider_options(
             provider=provider, providers=providers, provider_options=provider_options

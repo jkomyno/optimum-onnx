@@ -20,11 +20,10 @@ from pathlib import Path
 
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from requests.exceptions import ConnectionError as RequestsConnectionError
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, Mxfp4Config
 from transformers.utils import is_torch_available
 
 from optimum.commands.export.onnx import parse_args_onnx
-from optimum.exporters.onnx.constants import SDPA_ARCHS_ONNX_EXPORT_NOT_SUPPORTED
 from optimum.exporters.onnx.convert import onnx_export_from_model
 from optimum.exporters.tasks import TasksManager
 from optimum.exporters.utils import DisableCompileContextManager
@@ -33,13 +32,8 @@ from optimum.utils.import_utils import (
     is_diffusers_available,
     is_sentence_transformers_available,
     is_timm_available,
-    is_transformers_version,
 )
 from optimum.utils.save_utils import maybe_load_preprocessors
-
-
-if is_transformers_version(">=", "4.55"):
-    from transformers import Mxfp4Config
 
 
 if is_torch_available():
@@ -291,7 +285,7 @@ def main_export(
 
         is_mxfp4 = getattr(config, "quantization_config", {}).get("quant_method", None) == "mxfp4"
         # mxfp4 quantized model will be dequantized to bf16
-        if is_mxfp4 and is_transformers_version(">=", "4.55"):
+        if is_mxfp4:
             torch_dtype = torch.float32 if model_type == "gpt_oss" else torch.bfloat16
             loading_kwargs["quantization_config"] = Mxfp4Config(dequantize=True)
 
@@ -311,11 +305,6 @@ def main_export(
                 f"Asked to export a {model_type} model for the task {task}{autodetected_message}, but the Optimum ONNX exporter only supports the tasks {', '.join(model_tasks.keys())} for {model_type}. Please use a supported task. Please open an issue at https://github.com/huggingface/optimum/issues if you would like the task {task} to be supported in the ONNX export for {model_type}."
             )
 
-        # TODO: Fix in Transformers so that SdpaAttention class can be exported to ONNX.
-        # This was fixed in transformers 4.42.0, we can remove it when minimum transformers version is updated to 4.42
-        if model_type in SDPA_ARCHS_ONNX_EXPORT_NOT_SUPPORTED and is_transformers_version("<", "4.42"):
-            loading_kwargs["attn_implementation"] = "eager"
-
         # Only eager attention implementation returns attentions
         if model_kwargs is not None and model_kwargs.get("output_attentions", False):
             logger.warning(
@@ -323,6 +312,9 @@ def main_export(
                 "Setting `attn_implementation='eager'` at loading time to ensure the attentions are returned by the model."
             )
             loading_kwargs["attn_implementation"] = "eager"
+
+    dtype_kwarg = "dtype" if library_name == "transformers" else "torch_dtype"
+    loading_kwargs[dtype_kwarg] = torch_dtype
 
     with DisableCompileContextManager():
         model = TasksManager.get_model_from_task(
@@ -336,7 +328,6 @@ def main_export(
             force_download=force_download,
             trust_remote_code=trust_remote_code,
             framework=framework,
-            torch_dtype=torch_dtype,
             device=device,
             library_name=library_name,
             **loading_kwargs,

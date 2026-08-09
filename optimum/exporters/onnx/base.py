@@ -39,11 +39,7 @@ from optimum.exporters.onnx.constants import ONNX_DECODER_MERGED_NAME, ONNX_DECO
 from optimum.exporters.onnx.model_patcher import ModelPatcher
 from optimum.utils import DEFAULT_DUMMY_SHAPES, DummyInputGenerator, DummySeq2SeqPastKeyValuesGenerator, logging
 from optimum.utils.doc import add_dynamic_docstring
-from optimum.utils.import_utils import (
-    is_onnx_available,
-    is_onnxruntime_available,
-    is_transformers_version,
-)
+from optimum.utils.import_utils import is_onnx_available, is_onnxruntime_available
 
 
 if is_accelerate_available():
@@ -115,9 +111,7 @@ class OnnxConfig(ExporterConfig, ABC):
             {"heatmaps": {0: "batch_size", 1: "num_keypoints", 2: "height", 3: "width"}}
         ),
         "mask-generation": OrderedDict({"logits": {0: "batch_size"}}),
-        "masked-im": OrderedDict(
-            {"reconstruction" if is_transformers_version(">=", "4.29.0") else "logits": {0: "batch_size"}}
-        ),
+        "masked-im": OrderedDict({"reconstruction": {0: "batch_size"}}),
         "multiple-choice": OrderedDict({"logits": {0: "batch_size", 1: "num_choices"}}),
         "object-detection": OrderedDict(
             {
@@ -137,7 +131,6 @@ class OnnxConfig(ExporterConfig, ABC):
         "text-generation": OrderedDict({"logits": {0: "batch_size", 1: "sequence_length"}}),
         "time-series-forecasting": OrderedDict({"prediction_outputs": {0: "batch_size"}}),
         "token-classification": OrderedDict({"logits": {0: "batch_size", 1: "sequence_length"}}),
-        "visual-question-answering": OrderedDict({"logits": {0: "batch_size", 1: "sequence_length"}}),
         "zero-shot-image-classification": OrderedDict(
             {
                 "logits_per_image": {0: "image_batch_size", 1: "text_batch_size"},

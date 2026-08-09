@@ -24,7 +24,7 @@ from transformers import AutoConfig, Pipeline
 from transformers import pipeline as transformers_pipeline
 from transformers.pipelines import TASK_ALIASES
 
-from optimum.utils import is_onnxruntime_available, is_transformers_version
+from optimum.utils import is_onnxruntime_available
 from optimum.utils.logging import get_logger
 
 
@@ -359,11 +359,6 @@ def pipeline(  # noqa: D417
             " as ONNX Runtime is the only supported backend. Please remove the `accelerator` argument."
         )
 
-    version_dependent_kwargs = {}
-    if is_transformers_version(">=", "4.46.0"):
-        # processor argument was added in transformers v4.46.0
-        version_dependent_kwargs["processor"] = processor
-
     if task is not None:
         # Fail before delegating, so an unsupported task does not surface as a transformers KeyError.
         normalize_task(task)
@@ -376,6 +371,7 @@ def pipeline(  # noqa: D417
             tokenizer=tokenizer,
             feature_extractor=feature_extractor,
             image_processor=image_processor,
+            processor=processor,
             # framework=framework,
             revision=revision,
             use_fast=use_fast,
@@ -386,7 +382,6 @@ def pipeline(  # noqa: D417
             trust_remote_code=trust_remote_code,
             model_kwargs=model_kwargs,
             pipeline_class=pipeline_class,
-            **version_dependent_kwargs,
             **kwargs,
         )
 
