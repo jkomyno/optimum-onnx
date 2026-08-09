@@ -16,7 +16,6 @@ import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional
 
 import onnx
 import pytest
@@ -172,12 +171,12 @@ class OnnxCLIExportTestCase(unittest.TestCase):
         task: str,
         monolith: bool = False,
         no_post_process: bool = False,
-        optimization_level: Optional[str] = None,
+        optimization_level: str | None = None,
         device: str = "cpu",
         dtype: str = "fp32",
         variant: str = "default",
         no_dynamic_axes: bool = False,
-        model_kwargs: Optional[dict] = None,
+        model_kwargs: dict | None = None,
         slim: bool = False,
         trust_remote_code: bool = False,
         dynamo: bool = False,
@@ -218,11 +217,11 @@ class OnnxCLIExportTestCase(unittest.TestCase):
         input_shape_for_validation: tuple,
         monolith: bool = False,
         no_post_process: bool = False,
-        optimization_level: Optional[str] = None,
+        optimization_level: str | None = None,
         device: str = "cpu",
         dtype: str = "fp32",
         variant: str = "default",
-        model_kwargs: Optional[dict] = None,
+        model_kwargs: dict | None = None,
         trust_remote_code: bool = False,
     ):
         with TemporaryDirectory() as tmpdir:

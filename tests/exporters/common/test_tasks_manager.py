@@ -13,7 +13,6 @@
 # limitations under the License.
 import importlib
 import inspect
-from typing import Optional
 from unittest import TestCase
 
 from transformers import BertConfig
@@ -36,7 +35,7 @@ NON_TRANSFORMERS_MODEL_TYPES = {
 
 class TasksManagerTestCase(TestCase):
     def _check_all_models_are_registered(
-        self, backend: str, class_prefix: str, classes_to_ignore: Optional[set[str]] = None
+        self, backend: str, class_prefix: str, classes_to_ignore: set[str] | None = None
     ):
         registered_classes = set()
         for mappings in TasksManager._SUPPORTED_MODEL_TYPE.values():

@@ -14,15 +14,14 @@
 import os
 import tempfile
 import unittest
-from typing import Optional
 
 import torch
 from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from onnxruntime import InferenceSession, SessionOptions
 from parameterized import parameterized
 from testing_utils import MODEL_NAMES, SEED, ORTModelTestMixin
-from transformers import AutoModelForCausalLM, AutoTokenizer, PretrainedConfig, set_seed
-from transformers.cache_utils import Cache, DynamicCache
+from transformers import AutoModelForCausalLM, AutoTokenizer, Mxfp4Config, PretrainedConfig, set_seed
+from transformers.cache_utils import Cache, DynamicCache, EncoderDecoderCache
 from transformers.generation import GenerationConfig
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
 
@@ -65,13 +64,6 @@ from optimum.onnxruntime import pipeline as ort_pipeline
 from optimum.utils.import_utils import is_transformers_version
 from optimum.utils.logging import get_logger
 from optimum.utils.testing_utils import grid_parameters, remove_directory, require_hf_token
-
-
-if is_transformers_version(">=", "4.54"):
-    from transformers.cache_utils import EncoderDecoderCache
-
-if is_transformers_version(">=", "4.55"):
-    from transformers import Mxfp4Config
 
 
 logger = get_logger(__name__)
@@ -227,7 +219,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         test_name: str,
         use_cache: bool = True,
         trust_remote_code: bool = False,
-        use_io_binding: Optional[bool] = None,
+        use_io_binding: bool | None = None,
         **kwargs,
     ):
         onnx_model = self.ORTMODEL_CLASS.from_pretrained(
@@ -238,35 +230,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         )
         return onnx_model
 
-    def mask_logits(self, logits, attention_mask):
-        """Mask the logits based on the attention mask."""
-        mask = attention_mask.unsqueeze(-1)
-        logits.masked_fill_(mask == 0, 0)
-        return logits
-
-    def mask_past_key_values(self, onnx_model, past_key_values, attention_mask):
-        """Mask the past key values based on the attention mask."""
-        if onnx_model.config.model_type == "gpt_bigcode":
-            if onnx_model.config.multi_query:
-                mask = attention_mask.unsqueeze(-1)
-            else:
-                mask = attention_mask.unsqueeze(1).unsqueeze(-1)
-            for i in range(len(past_key_values)):
-                past_key_values[i].masked_fill_(mask == 0, 0)
-        elif onnx_model.config.model_type == "bloom" and onnx_model.old_bloom_modeling:
-            num_key_value_heads = onnx_model.num_key_value_heads
-            key_mask = attention_mask.repeat_interleave(num_key_value_heads, dim=0).unsqueeze(1)
-            value_mask = attention_mask.repeat_interleave(num_key_value_heads, dim=0).unsqueeze(-1)
-            for i in range(len(past_key_values)):
-                past_key_values[i][0].masked_fill_(key_mask == 0, 0)
-                past_key_values[i][1].masked_fill_(value_mask == 0, 0)
-        else:
-            mask = attention_mask.unsqueeze(1).unsqueeze(-1)
-            for i in range(len(past_key_values)):
-                past_key_values[i][0].masked_fill_(mask == 0, 0)
-                past_key_values[i][1].masked_fill_(mask == 0, 0)
-
-    def check_onnx_model_attributes(self, onnx_model, use_cache: bool = True, use_io_binding: Optional[bool] = None):
+    def check_onnx_model_attributes(self, onnx_model, use_cache: bool = True, use_io_binding: bool | None = None):
         self.assertIsInstance(onnx_model, self.ORTMODEL_CLASS)
         self.assertIsInstance(onnx_model.config, PretrainedConfig)
         self.assertIsInstance(onnx_model.session, InferenceSession)
@@ -285,16 +249,12 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         outputs1,
         outputs2,
         onnx_model: ORTModelForCausalLM,
-        use_cache: Optional[bool] = None,
+        use_cache: bool | None = None,
     ):
         self.assertTrue("logits" in outputs1)
         self.assertTrue("logits" in outputs2)
         self.assertIsInstance(outputs1.logits, torch.Tensor)
         self.assertIsInstance(outputs2.logits, torch.Tensor)
-
-        if is_transformers_version("<", "4.39.0") and "attention_mask" in inputs:
-            self.mask_logits(outputs1.logits, inputs["attention_mask"])
-            self.mask_logits(outputs2.logits, inputs["attention_mask"])
 
         torch.testing.assert_close(outputs1.logits, outputs2.logits, atol=self.ATOL, rtol=self.RTOL)
 
@@ -311,7 +271,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
                     outputs1.past_key_values = [
                         (layer.keys, layer.values) for layer in outputs1.past_key_values.layers
                     ]
-            elif is_transformers_version(">=", "4.54") and isinstance(outputs1.past_key_values, EncoderDecoderCache):
+            elif isinstance(outputs1.past_key_values, EncoderDecoderCache):
                 # error in latest transformers versions where GPTBigCode returns an EncoderDecoderCache
                 if hasattr(outputs1.past_key_values.self_attention_cache, "to_legacy_cache"):
                     outputs1.past_key_values = outputs1.past_key_values.self_attention_cache.to_legacy_cache()
@@ -327,7 +287,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
                     outputs2.past_key_values = [
                         (layer.keys, layer.values) for layer in outputs2.past_key_values.layers
                     ]
-            elif is_transformers_version(">=", "4.54") and isinstance(outputs2.past_key_values, EncoderDecoderCache):
+            elif isinstance(outputs2.past_key_values, EncoderDecoderCache):
                 # error in latest transformers versions where GPTBigCode returns an EncoderDecoderCache
                 if hasattr(outputs2.past_key_values.self_attention_cache, "to_legacy_cache"):
                     outputs2.past_key_values = outputs2.past_key_values.self_attention_cache.to_legacy_cache()
@@ -335,10 +295,6 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
                     outputs2.past_key_values = [
                         (layer.keys, layer.values) for layer in outputs2.past_key_values.self_attention_cache.layers
                     ]
-
-            if is_transformers_version("<", "4.39.0") and "attention_mask" in inputs:
-                self.mask_past_key_values(onnx_model, outputs1.past_key_values, inputs["attention_mask"])
-                self.mask_past_key_values(onnx_model, outputs2.past_key_values, inputs["attention_mask"])
 
             torch.testing.assert_close(
                 outputs1.past_key_values, outputs2.past_key_values, atol=self.ATOL, rtol=self.RTOL
@@ -417,8 +373,6 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         self.check_onnx_model_attributes(model, use_cache=True)
 
     def test_load_model_from_cache(self):
-        if is_transformers_version("<", "4.46"):
-            self.skipTest("won't investigate that issue")
         model = self.ORTMODEL_CLASS.from_pretrained(self.ONNX_MODEL_ID)  # caching the model
         model = self.ORTMODEL_CLASS.from_pretrained(self.ONNX_MODEL_ID, local_files_only=True)
         self.check_onnx_model_attributes(model, use_cache=True)
@@ -486,7 +440,6 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         onnx_outputs = onnx_model(**inputs)
         self.compare_logits(inputs, outputs, onnx_outputs, onnx_model=onnx_model)
 
-    @unittest.skipIf(is_transformers_version("<", "4.45"), reason="broken for old versions of transformers")
     def test_load_model_infer_onnx_model(self):
         # export from hub
         model = self.ORTMODEL_CLASS.from_pretrained(self.ONNX_MODEL_ID)
@@ -591,20 +544,6 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
         set_seed(SEED)
         onnx_outputs = onnx_model.generate(**inputs, generation_config=gen_config)
         torch.testing.assert_close(onnx_outputs, outputs, atol=self.ATOL, rtol=self.RTOL)
-
-        if is_transformers_version("<", "4.57.0"):
-            # group beam search with diversity penalty
-            gen_config = GenerationConfig(
-                num_beams=4,
-                max_new_tokens=10,
-                min_new_tokens=10,
-                diversity_penalty=0.0001,
-                num_beam_groups=2,
-                do_sample=False,
-            )
-            outputs = model.generate(**inputs, generation_config=gen_config)
-            onnx_outputs = onnx_model.generate(**inputs, generation_config=gen_config)
-            torch.testing.assert_close(onnx_outputs, outputs, atol=self.ATOL, rtol=self.RTOL)
 
     @parameterized.expand(SUPPORTED_ARCHITECTURES)
     def test_compare_generation_with_and_without_past_key_values(self, model_arch):
@@ -757,8 +696,7 @@ class ORTModelForCausalLMIntegrationTest(ORTModelTestMixin):
 
     @parameterized.expand([(False,), (True,)])
     def test_inference_with_old_onnx_model(self, use_cache):
-        if is_transformers_version(">=", "4.57"):
-            self.skipTest("deactivate this test until better understanding")
+        self.skipTest("deactivated under Transformers v5 pending updated legacy-model coverage")
         # old onnx model can't handle batched inputs (missing position_ids)
         inputs = self.get_inputs("gpt2", batched=False)
         model = self.AUTOMODEL_CLASS.from_pretrained("gpt2").eval()

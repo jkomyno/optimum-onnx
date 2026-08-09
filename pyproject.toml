@@ -73,7 +73,7 @@ version = { attr = "optimum.onnx.version.__version__" }
 
 [tool.ruff]
 line-length = 119
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 ignore = [

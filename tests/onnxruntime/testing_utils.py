@@ -17,7 +17,6 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch
@@ -217,7 +216,7 @@ class TemporaryHubRepo:
     ```
     """
 
-    def __init__(self, namespace: Optional[str] = None, token: Optional[str] = None) -> None:
+    def __init__(self, namespace: str | None = None, token: str | None = None) -> None:
         self.token = token
         with tempfile.TemporaryDirectory() as tmp_dir:
             repo_id = Path(tmp_dir).name

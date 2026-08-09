@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import re
+from importlib import import_module
 from importlib.metadata import requires
 
 import pytest
@@ -37,6 +38,7 @@ from transformers import (
 )
 from transformers.pipelines import TASK_ALIASES
 
+from optimum.exporters.onnx import main_export
 from optimum.onnxruntime import (
     ORTModelForCausalLM,
     ORTModelForSeq2SeqLM,
@@ -88,6 +90,45 @@ def test_installed_distribution_requires_transformers_v5():
     assert requirement.specifier.contains("5.14.0")
     assert not requirement.specifier.contains("4.57.0")
     assert not requirement.specifier.contains("6.0.0")
+
+
+@pytest.mark.parametrize(
+    ("library_name", "task", "expected_kwarg"),
+    [
+        ("transformers", "text-classification", "dtype"),
+        ("timm", "image-classification", "torch_dtype"),
+    ],
+)
+def test_main_export_routes_dtype_to_the_selected_library(
+    monkeypatch, tmp_path, library_name: str, task: str, expected_kwarg: str
+):
+    export_main = import_module("optimum.exporters.onnx.__main__")
+    captured_kwargs = {}
+
+    if library_name == "transformers":
+        monkeypatch.setattr(export_main.AutoConfig, "from_pretrained", lambda *args, **kwargs: BertConfig())
+    else:
+        monkeypatch.setattr(export_main, "is_timm_available", lambda: True)
+
+    def stop_after_model_loading(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        raise RuntimeError("stop after model loading")
+
+    monkeypatch.setattr(export_main.TasksManager, "get_model_from_task", stop_after_model_loading)
+
+    with pytest.raises(RuntimeError, match="stop after model loading"):
+        main_export(
+            "unused-local-model",
+            output=tmp_path,
+            task=task,
+            framework="pt",
+            library_name=library_name,
+            dtype="fp16",
+        )
+
+    other_kwarg = "torch_dtype" if expected_kwarg == "dtype" else "dtype"
+    assert captured_kwargs[expected_kwarg] is torch.float16
+    assert other_kwarg not in captured_kwargs
 
 
 def test_every_registered_pipeline_task_exists_in_transformers():

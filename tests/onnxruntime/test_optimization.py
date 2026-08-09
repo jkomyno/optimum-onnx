@@ -18,7 +18,6 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import onnx
@@ -174,11 +173,10 @@ class ORTOptimizerTest(unittest.TestCase):
         (ORTModelForSemanticSegmentation, "hf-internal-testing/tiny-random-SegformerModel"),
     )
 
-    if is_transformers_version(">=", "4.38.0"):
-        # testing clip and vit is necessary to catch missing optimization options
-        SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID += (
-            (ORTModelForImageClassification, "hf-internal-testing/tiny-random-ClipModel"),
-        )
+    # testing clip and vit is necessary to catch missing optimization options
+    SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID += (
+        (ORTModelForImageClassification, "hf-internal-testing/tiny-random-ClipModel"),
+    )
 
     @parameterized.expand(SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID)
     def test_compare_original_image_model_with_optimized_model(self, model_cls, model_name):
@@ -281,7 +279,7 @@ class ORTOptimizerForSeq2SeqLMIntegrationTest(ORTOptimizerTestMixin):
         use_cache: bool,
         optimization_level: str,
         provider: str,
-        use_io_binding: Optional[bool] = None,
+        use_io_binding: bool | None = None,
     ):
         export_name = test_name[:-3]  # remove `_OX` that is irrelevant as the export
         model_args = {"test_name": export_name, "model_arch": model_arch, "use_cache": use_cache}
@@ -390,7 +388,7 @@ class ORTOptimizerForSpeechSeq2SeqIntegrationTest(ORTOptimizerTestMixin):
         use_cache: bool,
         optimization_level: str,
         provider: str,
-        use_io_binding: Optional[bool] = None,
+        use_io_binding: bool | None = None,
     ):
         export_name = test_name[:-3]  # remove `_OX` that is irrelevant as the export
         model_args = {"test_name": export_name, "model_arch": model_arch, "use_cache": use_cache}
@@ -504,7 +502,7 @@ class ORTOptimizerForCausalLMIntegrationTest(ORTOptimizerTestMixin):
         use_cache: bool,
         optimization_level: str,
         provider: str,
-        use_io_binding: Optional[bool] = None,
+        use_io_binding: bool | None = None,
     ):
         if use_cache is False:
             use_io_binding = False

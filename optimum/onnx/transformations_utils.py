@@ -14,7 +14,7 @@
 
 import hashlib
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -253,7 +253,7 @@ def _get_onnx_opset(model: onnx.ModelProto):
     return opset_import.version
 
 
-def _deduplicated_cross_model_initializers(models: list[onnx.ModelProto], suffix: Optional[str] = None):
+def _deduplicated_cross_model_initializers(models: list[onnx.ModelProto], suffix: str | None = None):
     """TODO: short documentation."""
     duplicates = _find_duplicate_initializers(models)
     name_sharing_dict = _create_name_sharing_dict(duplicates, suffix=suffix)

@@ -14,7 +14,7 @@
 import torch
 from transformers.models.vit.modeling_vit import ViTPatchEmbeddings
 
-from .model_patcher import ModelPatcher, is_transformers_version
+from .model_patcher import ModelPatcher
 
 
 def patched_vit_patch_embedding_forward(
@@ -48,12 +48,10 @@ class ViTForImageClassificationPatcher(ModelPatcher):
     def __enter__(self):
         super().__enter__()
 
-        if is_transformers_version(">=", "4.36.0"):
-            self.original_forward = ViTPatchEmbeddings.forward
-            ViTPatchEmbeddings.forward = patched_vit_patch_embedding_forward
+        self.original_forward = ViTPatchEmbeddings.forward
+        ViTPatchEmbeddings.forward = patched_vit_patch_embedding_forward
 
     def __exit__(self, exc_type, exc_value, traceback):
         super().__exit__(exc_type, exc_value, traceback)
 
-        if is_transformers_version(">=", "4.36.0"):
-            ViTPatchEmbeddings.forward = self.original_forward
+        ViTPatchEmbeddings.forward = self.original_forward

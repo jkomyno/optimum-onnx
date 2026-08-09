@@ -105,7 +105,6 @@ from optimum.utils import (
     T5DummySeq2SeqPastKeyValuesGenerator,
     VitPoseDummyInputGenerator,
     is_diffusers_version,
-    is_transformers_version,
     logging,
 )
 from optimum.utils.normalized_config import NormalizedConfigManager
@@ -420,9 +419,7 @@ class GPTNeoXOnnxConfig(TextDecoderWithPositionIdsOnnxConfig):
 
 
 @register_tasks_manager_onnx("opt", *[*COMMON_TEXT_GENERATION_TASKS, "text-classification", "question-answering"])
-class OPTOnnxConfig(
-    TextDecoderWithPositionIdsOnnxConfig if is_transformers_version(">=", "4.46.0") else TextDecoderOnnxConfig
-):
+class OPTOnnxConfig(TextDecoderWithPositionIdsOnnxConfig):
     NORMALIZED_CONFIG_CLASS = NormalizedTextConfig
 
 
@@ -595,24 +592,6 @@ class BloomOnnxConfig(TextDecoderOnnxConfig):
     DUMMY_INPUT_GENERATOR_CLASSES = (DummyTextInputGenerator, BloomDummyPastKeyValuesGenerator)
     NORMALIZED_CONFIG_CLASS = NormalizedTextConfig.with_args(num_layers="n_layer", num_attention_heads="n_head")
 
-    def add_past_key_values(self, inputs_or_outputs: dict[str, dict[int, str]], direction: str):
-        if is_transformers_version(">=", "4.44"):
-            super().add_past_key_values(inputs_or_outputs, direction)
-        else:
-            if direction not in ["inputs", "outputs"]:
-                raise ValueError(f'direction must either be "inputs" or "outputs", but {direction} was given')
-
-            if direction == "inputs":
-                decoder_sequence_name = "past_sequence_length"
-                name = "past_key_values"
-            else:
-                decoder_sequence_name = "past_sequence_length + sequence_length"
-                name = "present"
-
-            for i in range(self._normalized_config.num_layers):
-                inputs_or_outputs[f"{name}.{i}.key"] = {0: "batch_size * num_heads", 2: decoder_sequence_name}
-                inputs_or_outputs[f"{name}.{i}.value"] = {0: "batch_size * num_heads", 1: decoder_sequence_name}
-
 
 @register_tasks_manager_onnx(
     "gpt_bigcode", *[*COMMON_TEXT_GENERATION_TASKS, "text-classification", "token-classification"]
@@ -621,37 +600,6 @@ class GPTBigCodeOnnxConfig(TextDecoderWithPositionIdsOnnxConfig):
     DUMMY_INPUT_GENERATOR_CLASSES = (DummyTextInputGenerator, GPTBigCodeDummyPastKeyValuesGenerator)
     NORMALIZED_CONFIG_CLASS = NormalizedConfigManager.get_normalized_config_class("gpt_bigcode")
     DUMMY_PKV_GENERATOR_CLASS = GPTBigCodeDummyPastKeyValuesGenerator
-
-    def add_past_key_values(self, inputs_or_outputs: dict[str, dict[int, str]], direction: str):
-        if is_transformers_version(">=", "4.54"):
-            super().add_past_key_values(inputs_or_outputs, direction)
-        else:
-            if direction not in ["inputs", "outputs"]:
-                raise ValueError(f'direction must either be "inputs" or "outputs", but {direction} was given')
-
-            if direction == "inputs":
-                decoder_sequence_name = "past_sequence_length"
-                name = "past_key_values"
-            else:
-                decoder_sequence_name = "past_sequence_length + sequence_length"
-                name = "present"
-
-            if self._normalized_config.multi_query:
-                decoder_sequence_dim = 1
-            else:
-                decoder_sequence_dim = 2
-
-            for i in range(self._normalized_config.num_layers):
-                inputs_or_outputs[f"{name}.{i}.key_value"] = {
-                    0: "batch_size",
-                    decoder_sequence_dim: decoder_sequence_name,
-                }
-
-    def flatten_past_key_values(self, flattened_output, name, idx, t):
-        if is_transformers_version(">=", "4.54"):
-            super().flatten_past_key_values(flattened_output, name, idx, t)
-        else:
-            flattened_output[f"{name}.{idx}.key_value"] = t
 
 
 @register_tasks_manager_onnx("falcon", *[*COMMON_TEXT_GENERATION_TASKS, "question-answering", "token-classification"])
@@ -1999,12 +1947,6 @@ class WhisperOnnxConfig(AudioToTextOnnxConfig):
             # TODO: this can be fixed by generating the correct inputs in the input generator
             common_inputs["encoder_outputs"] = {0: "batch_size", 1: "encoder_sequence_length"}
 
-        if self._behavior in {ConfigBehavior.DECODER, ConfigBehavior.MONOLITH}:
-            if is_transformers_version(">=", "4.43.0") and is_transformers_version("<", "4.46.0"):
-                # since https://github.com/huggingface/transformers/pull/31166
-                if self._behavior is not ConfigBehavior.ENCODER and self.use_past_in_inputs:
-                    common_inputs["cache_position"] = {0: "decoder_sequence_length"}
-
         return common_inputs
 
     @property
@@ -2549,16 +2491,6 @@ class Pix2StructOnnxConfig(OnnxSeq2SeqConfigWithPast):
         DummySeq2SeqPastKeyValuesGenerator,
         DummyPix2StructInputGenerator,
     )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if is_transformers_version("==", "4.46.0"):
-            logging.warn_once(
-                logger,
-                "Found transformers v4.46.0 while trying to export a Pix2Struct model, "
-                "this specific version of transformers is broken for this model. Please "
-                "upgrade to v4.46.1 or higher, or downgrade to v4.45.x.",
-            )
 
     @property
     def inputs(self):

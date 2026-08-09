@@ -28,6 +28,7 @@ from transformers import (
     AutoModelForSpeechSeq2Seq,
     GenerationConfig,
     GenerationMixin,
+    MoonshineForConditionalGeneration,
     Pix2StructForConditionalGeneration,
     WhisperForConditionalGeneration,
 )
@@ -41,6 +42,7 @@ except ImportError:
 from transformers.file_utils import add_end_docstrings, add_start_docstrings_to_model_forward
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 from transformers.models.auto.modeling_auto import MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES
+from transformers.models.whisper.generation_whisper import WhisperGenerationMixin
 
 from onnxruntime import InferenceSession, SessionOptions
 from optimum.exporters.onnx import main_export
@@ -59,23 +61,9 @@ from optimum.onnxruntime.constants import (
 )
 from optimum.onnxruntime.modeling import ORTModel
 from optimum.onnxruntime.utils import DummyWhisperModel, prepare_providers_and_provider_options
-from optimum.utils import is_transformers_version
 from optimum.utils.file_utils import find_files_matching_pattern
 from optimum.utils.logging import get_logger
 from optimum.utils.save_utils import maybe_save_preprocessors
-
-
-if is_transformers_version(">=", "4.48.0"):
-    from transformers import MoonshineForConditionalGeneration
-else:
-    MoonshineForConditionalGeneration = None
-
-if is_transformers_version(">=", "4.49.0"):
-    # Because of some type hint logic added in PreTrainedModel we use
-    # WhisperGenerationMixin instead of always using WhisperForConditionalGeneration
-    from transformers.models.whisper.generation_whisper import WhisperGenerationMixin
-else:
-    WhisperGenerationMixin = WhisperForConditionalGeneration
 
 
 if TYPE_CHECKING:
@@ -991,18 +979,6 @@ class ORTModelForConditionalGeneration(ORTParentMixin, ORTModel, GenerationMixin
 
         generation_config.use_cache = use_cache
 
-        if is_transformers_version(">=", "4.45.0") and is_transformers_version("<", "4.99"):
-            misplaced_generation_parameters = config._get_non_default_generation_parameters()
-            if len(misplaced_generation_parameters) > 0:
-                logger.warning(
-                    "Moving the following attributes in the config to the generation config: "
-                    f"{misplaced_generation_parameters}. You are seeing this warning because you've set "
-                    "generation parameters in the model config, as opposed to in the generation config.",
-                )
-                for param_name, param_value in misplaced_generation_parameters.items():
-                    setattr(generation_config, param_name, param_value)
-                    setattr(config, param_name, None)
-
         providers, provider_options = prepare_providers_and_provider_options(
             provider=provider, providers=providers, provider_options=provider_options
         )
@@ -1135,29 +1111,6 @@ class ORTModelForConditionalGeneration(ORTParentMixin, ORTModel, GenerationMixin
                 "Expected tuple of tuples of length 2 or 4, "
                 "where each tuple contains the past key and value tensors for each layer."
             )
-
-    def prepare_inputs_for_generation(self, *args, **kwargs):
-        if is_transformers_version("<", "4.46.0"):
-            return self._prepare_inputs_for_generation_legacy(*args, **kwargs)
-        else:
-            return super().prepare_inputs_for_generation(*args, **kwargs)
-
-    def _prepare_inputs_for_generation_legacy(
-        self, input_ids, past_key_values: tuple[tuple[torch.Tensor]] | None = None, **kwargs
-    ) -> dict:
-        if past_key_values is not None:
-            past_seq_len = past_key_values[0][0].shape[2]
-            if input_ids.shape[1] > past_seq_len:
-                remove_prefix_length = past_seq_len
-            else:
-                remove_prefix_length = input_ids.shape[1] - 1
-            input_ids = input_ids[:, remove_prefix_length:]
-
-        return {
-            "decoder_input_ids": input_ids,
-            "past_key_values": past_key_values,
-            **kwargs,
-        }
 
     @property
     def can_use_cache(self) -> bool:

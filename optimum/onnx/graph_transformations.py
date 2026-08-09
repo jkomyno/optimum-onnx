@@ -218,11 +218,11 @@ def merge_decoders(
     Returns:
         `~onnx.ModelProto`: The fused decoder ONNX model.
     """
-    if isinstance(decoder, (str, Path)):
+    if isinstance(decoder, str | Path):
         decoder = Path(decoder).as_posix()
         decoder = onnx.load(decoder)
 
-    if isinstance(decoder_with_past, (str, Path)):
+    if isinstance(decoder_with_past, str | Path):
         decoder_with_past = Path(decoder_with_past).as_posix()
         decoder_with_past = onnx.load(decoder_with_past)
 

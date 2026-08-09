@@ -20,13 +20,13 @@ import gc
 import multiprocessing as mp
 import os
 import traceback
+from collections.abc import Callable
 from inspect import signature
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
-from transformers.generation import GenerationMixin
 
 
 try:
@@ -62,7 +62,6 @@ from optimum.utils import (
     is_onnxslim_available,
     is_torch_onnx_support_available,
     is_torch_version,
-    is_transformers_version,
     logging,
 )
 from optimum.utils.modeling_utils import MODEL_TO_PATCH_FOR_PAST
@@ -328,7 +327,7 @@ def _run_validation(
         # ("past_key_values" being taken for the ONNX inputs)
         if name == "past_key_values":
             name = "present"
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             onnx_output_name = config.torch_to_onnx_output_map.get(name, name)
             value = config.flatten_output_collection_property(onnx_output_name, value)
             ref_outputs_dict.update(value)
@@ -344,7 +343,7 @@ def _run_validation(
     # We flatten potential collection of inputs (i.e. past_keys)
     onnx_inputs = {}
     for name, value in reference_ort_inputs.items():
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             value = config.flatten_output_collection_property(name, value)
             onnx_inputs.update({tensor_name: pt_tensor.cpu().numpy() for tensor_name, pt_tensor in value.items()})
         elif isinstance(value, dict):
@@ -589,11 +588,8 @@ def export_pytorch(
     FORCE_ONNX_EXTERNAL_DATA = os.getenv("FORCE_ONNX_EXTERNAL_DATA", "0") == "1"  # noqa: N806
 
     model_kwargs = model_kwargs or {}
-    # num_logits_to_keep was added in transformers 4.45 and isn't added as inputs when exporting the model
-    if is_transformers_version(">=", "4.45"):
-        logits_to_keep_name = "logits_to_keep" if is_transformers_version(">=", "4.49") else "num_logits_to_keep"
-        if logits_to_keep_name in signature(model.forward).parameters:
-            model_kwargs[logits_to_keep_name] = 0
+    if "logits_to_keep" in signature(model.forward).parameters:
+        model_kwargs["logits_to_keep"] = 0
 
     with torch.no_grad():
         model.config.return_dict = True
@@ -1123,22 +1119,6 @@ def onnx_export_from_model(
             atol = onnx_config.ATOL_FOR_VALIDATION
             if isinstance(atol, dict):
                 atol = atol[task.replace("-with-past", "")]
-
-        if is_transformers_version(">=", "4.44.99") and is_transformers_version("<", "4.99"):
-            misplaced_generation_parameters = model.config._get_non_default_generation_parameters()
-            if (
-                isinstance(model, GenerationMixin)
-                and model.can_generate()
-                and len(misplaced_generation_parameters) > 0
-            ):
-                logger.warning(
-                    "Moving the following attributes in the config to the generation config: "
-                    f"{misplaced_generation_parameters}. You are seeing this warning because you've set "
-                    "generation parameters in the model config, as opposed to in the generation config.",
-                )
-                for param_name, param_value in misplaced_generation_parameters.items():
-                    setattr(model.generation_config, param_name, param_value)
-                    setattr(model.config, param_name, None)
 
         # Saving the model config and preprocessor as this is needed sometimes.
         model.config.save_pretrained(output)
