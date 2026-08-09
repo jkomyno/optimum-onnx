@@ -14,8 +14,10 @@
 
 from __future__ import annotations
 
+import re
 from importlib.metadata import requires
 
+import pytest
 import torch
 import transformers
 from packaging.requirements import Requirement
@@ -33,6 +35,7 @@ from transformers import (
     T5Config,
     T5ForConditionalGeneration,
 )
+from transformers.pipelines import TASK_ALIASES
 
 from optimum.onnxruntime import (
     ORTModelForCausalLM,
@@ -41,6 +44,13 @@ from optimum.onnxruntime import (
     pipeline,
 )
 from optimum.onnxruntime.modeling import ORTModel
+from optimum.onnxruntime.pipelines import (
+    ORT_TASKS_MAPPING,
+    REMOVED_IN_TRANSFORMERS_V5,
+    normalize_task,
+    ort_load_model,
+    patch_pipelines_to_load_ort_model,
+)
 
 
 VOCAB_SIZE = 32
@@ -78,6 +88,50 @@ def test_installed_distribution_requires_transformers_v5():
     assert requirement.specifier.contains("5.14.0")
     assert not requirement.specifier.contains("4.57.0")
     assert not requirement.specifier.contains("6.0.0")
+
+
+def test_every_registered_pipeline_task_exists_in_transformers():
+    unknown = sorted(set(ORT_TASKS_MAPPING) - set(transformers.pipelines.SUPPORTED_TASKS))
+
+    assert unknown == []
+
+
+def test_pipeline_docstring_advertises_no_unsupported_task():
+    advertised = set(re.findall(r'- `"([a-z0-9_-]+)"`', pipeline.__doc__))
+    advertised -= set(TASK_ALIASES)
+
+    assert sorted(advertised - set(ORT_TASKS_MAPPING)) == []
+
+
+def test_transformers_exposes_the_patched_pipeline_loader():
+    assert hasattr(transformers.pipelines, "load_model")
+
+    with patch_pipelines_to_load_ort_model():
+        assert transformers.pipelines.load_model is ort_load_model
+
+    assert transformers.pipelines.load_model is not ort_load_model
+
+
+@pytest.mark.parametrize("task, model_class_name", REMOVED_IN_TRANSFORMERS_V5.items())
+def test_pipeline_tasks_removed_in_transformers_v5_raise_a_clear_error(task, model_class_name):
+    with pytest.raises(ValueError) as error:
+        pipeline(task, model="unused-local-model")
+
+    assert task in str(error.value)
+    assert model_class_name in str(error.value)
+
+
+def test_unsupported_pipeline_task_raises_a_clear_error():
+    with pytest.raises(ValueError, match="not supported by ONNX Runtime"):
+        pipeline("not-a-real-task", model="unused-local-model")
+
+
+@pytest.mark.parametrize(
+    "alias, task",
+    [(alias, task) for alias, task in TASK_ALIASES.items() if task in ORT_TASKS_MAPPING],
+)
+def test_pipeline_task_aliases_resolve_to_registered_tasks(alias, task):
+    assert normalize_task(alias) == task
 
 
 def test_encoder_export_runtime_and_pipeline_are_offline(tmp_path):

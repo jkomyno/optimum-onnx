@@ -73,7 +73,4 @@ jobs:
 
       - name: Run deterministic compatibility tests
         run: |
-          pytest \
-            tests/transformers_v5/test_offline_compatibility.py \
-            tests/onnxruntime/test_modeling.py::ORTPipelineRegistryTest \
-            -v -rf
+          pytest tests/transformers_v5/test_offline_compatibility.py -v -rf

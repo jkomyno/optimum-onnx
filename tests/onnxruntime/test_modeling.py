@@ -13,7 +13,6 @@
 # limitations under the License.
 import gc
 import os
-import re
 import subprocess
 import tempfile
 import unittest
@@ -24,7 +23,6 @@ import onnxruntime
 import pytest
 import requests
 import torch
-import transformers.pipelines
 from huggingface_hub import HfApi
 from huggingface_hub.constants import default_cache_path
 from parameterized import parameterized
@@ -60,7 +58,6 @@ from transformers import (
 )
 from transformers.modeling_outputs import BaseModelOutput, ImageSuperResolutionOutput
 from transformers.models.swin2sr.configuration_swin2sr import Swin2SRConfig
-from transformers.pipelines import TASK_ALIASES
 from transformers.testing_utils import get_gpu_count, require_torch_gpu
 from transformers.utils import http_user_agent
 
@@ -84,13 +81,6 @@ from optimum.onnxruntime import (
     ORTModelForTokenClassification,
     ORTModelForZeroShotImageClassification,
     pipeline,
-)
-from optimum.onnxruntime.pipelines import (
-    ORT_TASKS_MAPPING,
-    REMOVED_IN_TRANSFORMERS_V5,
-    normalize_task,
-    ort_load_model,
-    patch_pipelines_to_load_ort_model,
 )
 from optimum.utils import CONFIG_NAME, logging
 from optimum.utils.save_utils import maybe_load_preprocessors
@@ -2861,63 +2851,6 @@ class TestBothExportersORTModel(unittest.TestCase):
                 f"For the task `{task}`, the ONNX export supports {supported_export_models}, but only {tested_architectures} are tested.\n"
                 f"    Missing {untested_architectures}."
             )
-
-
-class ORTPipelineRegistryTest(unittest.TestCase):
-    """Guards the `optimum.onnxruntime.pipeline` task registry against upstream drift.
-
-    `patch_pipelines_to_load_ort_model` used to be guarded by a `hasattr` check on a transformers
-    internal. When transformers v5 renamed that internal, the guard turned the whole patch into a
-    silent no-op and `pipeline()` returned torch models while callers believed they were ORT-backed.
-    These tests assert the properties that would have caught it.
-    """
-
-    def test_every_registered_task_exists_in_transformers(self):
-        unknown = sorted(set(ORT_TASKS_MAPPING) - set(transformers.pipelines.SUPPORTED_TASKS))
-        self.assertEqual(
-            unknown,
-            [],
-            f"These tasks are registered in ORT_TASKS_MAPPING but no longer exist in "
-            f"transformers.pipelines.SUPPORTED_TASKS: {unknown}. Advertising them means "
-            "`pipeline()` raises inside transformers. Remove them and record the removal in "
-            "REMOVED_IN_TRANSFORMERS_V5.",
-        )
-
-    def test_pipeline_docstring_advertises_no_unsupported_task(self):
-        docstring = pipeline.__doc__
-        advertised = set(re.findall(r'- `"([a-z0-9_-]+)"`', docstring))
-        # Aliases are documented alongside the task they resolve to.
-        advertised -= set(TASK_ALIASES)
-        unsupported = sorted(advertised - set(ORT_TASKS_MAPPING))
-        self.assertEqual(unsupported, [], f"The `pipeline()` docstring advertises unsupported tasks: {unsupported}.")
-
-    def test_transformers_exposes_the_patched_loader(self):
-        # `patch_pipelines_to_load_ort_model` raises rather than silently no-opping, but only if
-        # this symbol is the one `transformers.pipelines.pipeline` actually resolves.
-        self.assertTrue(hasattr(transformers.pipelines, "load_model"))
-        with patch_pipelines_to_load_ort_model():
-            self.assertIs(transformers.pipelines.load_model, ort_load_model)
-        self.assertIsNot(transformers.pipelines.load_model, ort_load_model)
-
-    def test_tasks_removed_in_transformers_v5_raise_a_clear_error(self):
-        for task, model_class_name in REMOVED_IN_TRANSFORMERS_V5.items():
-            with self.subTest(task=task), self.assertRaises(ValueError) as context:
-                pipeline(task, model=MODEL_NAMES["bert"])
-            message = str(context.exception)
-            self.assertIn(task, message)
-            self.assertIn(model_class_name, message)
-
-    def test_unsupported_task_raises_a_clear_error(self):
-        with self.assertRaises(ValueError) as context:
-            pipeline("not-a-real-task", model=MODEL_NAMES["bert"])
-        self.assertIn("not supported by ONNX Runtime", str(context.exception))
-
-    def test_task_aliases_resolve_to_registered_tasks(self):
-        for alias, task in TASK_ALIASES.items():
-            if task not in ORT_TASKS_MAPPING:
-                continue
-            with self.subTest(alias=alias):
-                self.assertEqual(normalize_task(alias), task)
 
 
 class ORTPipelineReturnsORTModelsTest(unittest.TestCase):
