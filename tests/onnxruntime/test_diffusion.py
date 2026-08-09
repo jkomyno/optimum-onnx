@@ -64,7 +64,7 @@ else:
     ORTPipelineForText2Image = None
 
 from optimum.onnxruntime.utils import get_device_for_provider
-from optimum.utils import is_diffusers_version, is_tensorrt_available, is_transformers_version
+from optimum.utils import is_diffusers_version, is_tensorrt_available
 from optimum.utils.testing_utils import grid_parameters, remove_directory, require_diffusers, require_hf_token
 
 
@@ -134,7 +134,7 @@ class ORTDiffusionPipelineTest(TestCase):
 
     @require_diffusers
     def test_load_diffusion_pipeline_model_from_hub(self):
-        if is_diffusers_version("<", "0.37") and is_transformers_version(">=", "4.57"):
+        if is_diffusers_version("<", "0.37"):
             self.skipTest("incompatible version between transformers and diffusers")
         pipe = ORTDiffusionPipeline.from_pretrained(self.TINY_ONNX_STABLE_DIFFUSION)
         self.assert_pipeline_sanity(pipe)
@@ -151,7 +151,7 @@ class ORTDiffusionPipelineTest(TestCase):
 
     @require_diffusers
     def test_load_diffusion_pipeline_from_cache(self):
-        if is_diffusers_version("<", "0.37") and is_transformers_version(">=", "4.57"):
+        if is_diffusers_version("<", "0.37"):
             self.skipTest("incompatible version between transformers and diffusers")
         dirpath = os.path.join(HF_HUB_CACHE, "models--" + self.TINY_ONNX_STABLE_DIFFUSION.replace("/", "--"))
         if os.path.exists(dirpath):
@@ -170,7 +170,7 @@ class ORTDiffusionPipelineTest(TestCase):
     @parameterized.expand(PROVIDERS)
     @require_diffusers
     def test_load_diffusion_pipeline_with_available_provider(self, provider):
-        if is_diffusers_version("<", "0.37") and is_transformers_version(">=", "4.57"):
+        if is_diffusers_version("<", "0.37"):
             self.skipTest("incompatible version between transformers and diffusers")
         pipe = ORTDiffusionPipeline.from_pretrained(self.TINY_ONNX_STABLE_DIFFUSION, provider=provider)
         self.assertEqual(pipe.device, get_device_for_provider(provider, {}))
@@ -201,7 +201,7 @@ class ORTDiffusionPipelineTest(TestCase):
 
     @require_diffusers
     def test_save_diffusion_pipeline(self):
-        if is_diffusers_version("<", "0.37") and is_transformers_version(">=", "4.57"):
+        if is_diffusers_version("<", "0.37"):
             self.skipTest("incompatible version between transformers and diffusers")
         with TemporaryDirectory() as tmpdirname:
             pipe = ORTDiffusionPipeline.from_pretrained(self.TINY_ONNX_STABLE_DIFFUSION)
@@ -274,11 +274,11 @@ class ORTPipelineForText2ImageTest(ORTModelTestMixin):
         "stable-diffusion-xl",
         "latent-consistency",
     ]
-    if is_diffusers_version(">=", "0.29.0") and is_transformers_version(">=", "4.42.0"):
+    if is_diffusers_version(">=", "0.29.0"):
         SUPPORTED_ARCHITECTURES += ["stable-diffusion-3"]
-    if is_diffusers_version(">=", "0.30.0") and is_transformers_version(">=", "4.42.0"):
+    if is_diffusers_version(">=", "0.30.0"):
         SUPPORTED_ARCHITECTURES += ["flux"]
-    # if is_diffusers_version(">=", "0.32.0") and is_transformers_version(">=", "4.42.0"):
+    # if is_diffusers_version(">=", "0.32.0"):
     #     SUPPORTED_ARCHITECTURES += ["sana"]
 
     ORTMODEL_CLASS = ORTPipelineForText2Image
@@ -557,7 +557,7 @@ class ORTPipelineForImage2ImageTest(ORTModelTestMixin):
         "stable-diffusion-xl",
         "latent-consistency",
     ]
-    if is_diffusers_version(">=", "0.29.0") and is_transformers_version(">=", "4.42.0"):
+    if is_diffusers_version(">=", "0.29.0"):
         SUPPORTED_ARCHITECTURES += ["stable-diffusion-3"]
 
     AUTOMODEL_CLASS = AutoPipelineForImage2Image
@@ -807,7 +807,7 @@ class ORTPipelineForInpaintingTest(ORTModelTestMixin):
         "stable-diffusion",
         "stable-diffusion-xl",
     ]
-    if is_diffusers_version(">=", "0.30.0") and is_transformers_version(">=", "4.42.0"):
+    if is_diffusers_version(">=", "0.30.0"):
         SUPPORTED_ARCHITECTURES += ["stable-diffusion-3"]
 
     AUTOMODEL_CLASS = AutoPipelineForInpainting

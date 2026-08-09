@@ -264,21 +264,6 @@ class ORTSeq2SeqTestMixin(ORTModelTestMixin):
         onnx_outputs = onnx_model.generate(**inputs, generation_config=gen_config)
         torch.testing.assert_close(outputs, onnx_outputs)
 
-        if is_transformers_version("<", "4.57.0"):
-            # group beam search with diversity penalty
-            gen_config = GenerationConfig(
-                num_beams=4,
-                do_sample=False,
-                max_new_tokens=10,
-                min_new_tokens=10,
-                num_beam_groups=2,
-                diversity_penalty=0.0001,
-                use_cache=use_cache,
-            )
-            outputs = model.generate(**inputs, generation_config=gen_config)
-            onnx_outputs = onnx_model.generate(**inputs, generation_config=gen_config)
-            torch.testing.assert_close(outputs, onnx_outputs)
-
     # NUMERICAL CONSISTENCY WITH DECODER MERGING
     def _test_compare_logits_merged_and_not_merged(self, model_arch: str, use_cache: bool = True):
         merged_setup_args = {
@@ -478,11 +463,6 @@ class ORTModelForSeq2SeqLMIntegrationTest(ORTSeq2SeqTestMixin):
         if model_arch == "encoder-decoder-bert-bert":
             # The encoder-decoder-bert-bert model is missing these attributes
             model.generation_config.decoder_start_token_id = 1
-
-        if model_arch == "encoder-decoder" and is_transformers_version("<", "4.54"):
-            # EncoderDecoderModel does not implement the `_reorder_cache` method
-            # So we use the one defined in the ORTModelForSeq2SeqLM class
-            model._reorder_cache = self.ORTMODEL_CLASS._reorder_cache
 
         if model_arch == "m2m_100":
             # madness -_-, I spent 2 days trying to figure out why the sequences didn't
@@ -792,9 +772,8 @@ class ORTModelForSeq2SeqLMIntegrationTest(ORTSeq2SeqTestMixin):
     # Generation is slow without pkv, and we do compare with/without pkv in a different test
     @parameterized.expand(grid_parameters({"use_cache": [True], "use_merged": [False, True]}))
     def test_ort_pipeline_with_default_model(self, test_name: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version(">=", "4.56") and use_cache:
-            # TODO: update the test for transformers>=4.57.
-            self.skipTest(f"<task>-with-past is no longer supported for transformers>=4.56. self.TASK={self.TASK!r}.")
+        if use_cache:
+            self.skipTest(f"<task>-with-past is not supported by Transformers v5. self.TASK={self.TASK!r}.")
         texts = self.get_inputs("t5", for_pipeline=True)
 
         # Text2Text generation
@@ -848,9 +827,8 @@ class ORTModelForSeq2SeqLMIntegrationTest(ORTSeq2SeqTestMixin):
     # Generation is slow without pkv, and we do compare with/without pkv in a different test
     @parameterized.expand(grid_parameters({"model_arch": ["t5"], "use_cache": [True], "use_merged": [False, True]}))
     def test_ort_pipeline_with_onnx_model(self, test_name: str, model_arch: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version(">=", "4.56") and use_cache:
-            # TODO: update the test for transformers>=4.57.
-            self.skipTest(f"<task>-with-past is no longer supported for transformers>=4.56. self.TASK={self.TASK!r}.")
+        if use_cache:
+            self.skipTest(f"<task>-with-past is not supported by Transformers v5. self.TASK={self.TASK!r}.")
         setup_args = {
             "test_name": test_name,
             "use_cache": use_cache,
@@ -1118,9 +1096,8 @@ class ORTModelForSpeechSeq2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         grid_parameters({"model_arch": ["whisper"], "use_cache": [True], "use_merged": [False, True]})
     )
     def test_ort_pipeline_with_onnx_model(self, test_name: str, model_arch: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version(">=", "4.56") and use_cache:
-            # TODO: update the test for transformers>=4.57.
-            self.skipTest(f"<task>-with-past is no longer supported for transformers>=4.56. self.TASK={self.TASK!r}.")
+        if use_cache:
+            self.skipTest(f"<task>-with-past is not supported by Transformers v5. self.TASK={self.TASK!r}.")
         setup_args = {
             "test_name": test_name,
             "use_cache": use_cache,
@@ -1239,18 +1216,6 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         model = self.AUTOMODEL_CLASS.from_pretrained(MODEL_NAMES[model_arch]).eval()
         model.decoder.config.use_cache = use_cache
 
-        if model_arch == "vision-encoder-decoder" and is_transformers_version("<", "4.54.0"):
-            # VisionEncoderDecoderModel does not implement the `_reorder_cache` method
-            # So we use the one defined in the ORT class
-            # Starting from transformers 4.54.0, VisionEncoderDecoderModel uses the encoder
-            # decoder cache class to perform cache reordering
-            model._reorder_cache = self.ORTMODEL_CLASS._reorder_cache
-
-        if model_arch == "pix2struct" and is_transformers_version("<", "4.50.0"):
-            # Pix2StructModel does not implement the `_reorder_cache` method in transformers < 4.50.0
-            # So we use the one defined in the ORT class
-            model._reorder_cache = self.ORTMODEL_CLASS._reorder_cache
-
         return model
 
     def get_onnx_model(
@@ -1358,13 +1323,8 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
     # PIPELINE TESTS
     @parameterized.expand(grid_parameters({"use_cache": [True], "use_merged": [False, True]}), skip_on_empty=True)
     def test_ort_pipeline_with_default_model(self, test_name: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version("<", "4.38.0"):
-            pytest.skip(
-                "Skipping because vision-encoder-decoder did not work properly with pipelines in transformers < 4.38.0"
-            )
-        if is_transformers_version(">=", "4.56") and use_cache:
-            # TODO: update the test for transformers>=4.57.
-            self.skipTest(f"<task>-with-past is no longer supported for transformers>=4.56. self.TASK={self.TASK!r}.")
+        if use_cache:
+            self.skipTest(f"<task>-with-past is not supported by Transformers v5. self.TASK={self.TASK!r}.")
 
         images = self.get_inputs("vision-encoder-decoder", for_pipeline=True)
 
@@ -1394,11 +1354,6 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         skip_on_empty=True,
     )
     def test_ort_pipeline_with_model_id(self, test_name: str, model_arch: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version("<", "4.38.0"):
-            pytest.skip(
-                "Skipping because vision-encoder-decoder did not work properly with pipelines in transformers < 4.38.0"
-            )
-
         images = self.get_inputs(model_arch, for_pipeline=True)
 
         # Image-to-Text generation
@@ -1430,13 +1385,8 @@ class ORTModelForVision2SeqIntegrationTest(ORTSeq2SeqTestMixin):
         skip_on_empty=True,
     )
     def test_ort_pipeline_with_onnx_model(self, test_name: str, model_arch: str, use_cache: bool, use_merged: bool):
-        if is_transformers_version("<", "4.38.0"):
-            pytest.skip(
-                "Skipping because vision-encoder-decoder did not work properly with pipelines in transformers < 4.38.0"
-            )
-        if is_transformers_version(">=", "4.56") and use_cache:
-            # TODO: update the test for transformers>=4.57.
-            self.skipTest(f"<task>-with-past is no longer supported for transformers>=4.56. self.TASK={self.TASK!r}.")
+        if use_cache:
+            self.skipTest(f"<task>-with-past is not supported by Transformers v5. self.TASK={self.TASK!r}.")
 
         setup_args = {
             "test_name": test_name,

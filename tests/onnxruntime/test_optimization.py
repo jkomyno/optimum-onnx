@@ -174,11 +174,10 @@ class ORTOptimizerTest(unittest.TestCase):
         (ORTModelForSemanticSegmentation, "hf-internal-testing/tiny-random-SegformerModel"),
     )
 
-    if is_transformers_version(">=", "4.38.0"):
-        # testing clip and vit is necessary to catch missing optimization options
-        SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID += (
-            (ORTModelForImageClassification, "hf-internal-testing/tiny-random-ClipModel"),
-        )
+    # testing clip and vit is necessary to catch missing optimization options
+    SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID += (
+        (ORTModelForImageClassification, "hf-internal-testing/tiny-random-ClipModel"),
+    )
 
     @parameterized.expand(SUPPORTED_IMAGE_ARCHITECTURES_WITH_MODEL_ID)
     def test_compare_original_image_model_with_optimized_model(self, model_cls, model_name):

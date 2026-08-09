@@ -1855,10 +1855,6 @@ class ORTModelForZeroShotImageClassificationIntegrationTest(ORTModelTestMixin):
     SUPPORTED_ARCHITECTURES = [  # noqa: RUF012
         "clip",
     ]
-    # still failing
-    # if is_transformers_version(">=", "4.56.2"):
-    #     SUPPORTED_ARCHITECTURES.append("metaclip_2")
-
     FULL_GRID = {"model_arch": SUPPORTED_ARCHITECTURES}  # noqa: RUF012
     ORTMODEL_CLASS = ORTModelForZeroShotImageClassification
     TASK = "zero-shot-image-classification"
